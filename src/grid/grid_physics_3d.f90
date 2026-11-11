@@ -16,6 +16,8 @@ module grid_physics
 
   private
   public :: setup_grid_physics
+  public :: scale_specific_energy_spectrum
+  public :: deposit_specific_energy_spectrum
   public :: sublimate_dust
   public :: update_alpha_inv_planck
   public :: check_energy_abs
@@ -36,8 +38,22 @@ module grid_physics
   integer(idp),allocatable, public :: n_photons(:)
   integer(idp),allocatable, public :: last_photon_id(:)
   real(dp),allocatable, public :: specific_energy(:,:)
+  real(dp),allocatable, public :: specific_energy_spectrum(:,:,:) 
   real(dp),allocatable, public :: specific_energy_sum(:,:)
+  real(dp),allocatable, public :: specific_energy_sum_spectrum(:,:,:)
+  ! Frequency bin edges for the specific energy spectrum: n_nu_bins+1
+  ! values that define the binning (photons outside the outer edges are not
+  ! counted), provided by the Python frontend.
+  real(dp),allocatable, public :: nu_bin_edges(:)
+  real(dp),allocatable, public :: log_nu_bin_edges(:)
+
+  ! Fraction of the emissivity falling into each frequency bin, for each
+  ! emissivity state and dust type - used to distribute energy deposited by
+  ! the MRW over the specific energy spectrum. Indexed (bin, state, dust).
+  real(dp),allocatable, public :: j_nu_bin_frac(:,:,:)
+
   real(dp),allocatable, public :: specific_energy_additional(:,:)
+  real(dp),allocatable, public :: specific_energy_additional_spectrum(:,:,:)
   real(dp),allocatable, public :: energy_abs_tot(:)
   real(dp),allocatable, public :: minimum_specific_energy(:)
 
@@ -51,11 +67,14 @@ module grid_physics
   ! Temporary variables (used for convenience in external modules)
   real(dp), allocatable, public :: tmp_column_density(:)
 
+  !Counting indices
   integer :: id
+  integer :: idx 
 
-  logical :: debug = .false.
 
   type(pdf_discrete_dp) :: absorption
+
+
 
 contains
 
@@ -89,16 +108,40 @@ contains
     id_select = sample_pdf(absorption)
   end function select_dust_specific_energy_rho
 
-  subroutine setup_grid_physics(group, use_mrw, use_pda)
+  subroutine setup_grid_physics(group, use_mrw, use_pda, compute_specific_energy_spectrum)
 
     implicit none
 
     integer(hid_t),intent(in) :: group
-    logical,intent(in) :: use_mrw, use_pda
+    logical,intent(in) :: use_mrw, use_pda, compute_specific_energy_spectrum
+    integer :: n_nu_bins
 
+    ! specific_energy_spectrum is binned onto the frequency bins defined by
+    ! the bin edges provided by the Python frontend. The spectrum arrays are
+    ! only allocated when the frequency-resolved specific energy is actually
+    ! requested (they can be large), so all whole-array operations on them
+    ! are guarded by allocated() or compute_specific_energy_spectrum checks.
+    if (compute_specific_energy_spectrum) then
+       n_nu_bins = size(specific_energy_spectrum_bin_edges) - 1
+       if (any(specific_energy_spectrum_bin_edges(2:) <= specific_energy_spectrum_bin_edges(:n_nu_bins))) then
+          call error("setup_grid_physics", "specific_energy_spectrum_bin_edges should be strictly increasing")
+       end if
+    else
+       n_nu_bins = 0
+    end if
     ! Density
     allocate(density(geo%n_cells, n_dust))
     allocate(specific_energy(geo%n_cells, n_dust))
+    if (compute_specific_energy_spectrum) then
+       allocate(specific_energy_spectrum(geo%n_cells,n_dust,n_nu_bins))
+       ! initialize: this array is only fully populated later (from the
+       ! photon deposits, or from the minimum specific energy), but with
+       ! specific_energy_type='additional' it is COPIED into
+       ! specific_energy_additional_spectrum before that happens -- copying
+       ! an uninitialized allocation injects heap garbage into the
+       ! frequency-resolved output at every iteration.
+       specific_energy_spectrum = 0._dp
+    end if
 
     if(n_dust > 0) then
 
@@ -146,6 +189,8 @@ contains
           ! Check number of dust types for specific_energy
           if(size(specific_energy, 2).ne.n_dust) call error("setup_grid","specific_energy array has wrong number of dust types")
 
+
+
           ! Reset specific energy to zero in masked cells
           if(geo%masked) then
              if(main_process()) write(*, '(" [grid_physics] applying mask to specific_energy grid")')
@@ -153,19 +198,41 @@ contains
                 where(.not.geo%mask)
                    specific_energy(:, id) = 0.
                 end where
+                
+                if (compute_specific_energy_spectrum) then
+                   do idx=1,n_nu_bins
+                      where(.not.geo%mask)
+                         specific_energy_spectrum(:, id, idx) = 0.
+                      endwhere
+                   end do
+                end if
+
              end do
           end if
 
           if(trim(specific_energy_type) == 'additional') then
              allocate(specific_energy_additional(geo%n_cells, n_dust))
+             if (compute_specific_energy_spectrum) then 
+                allocate(specific_energy_additional_spectrum(geo%n_cells,n_dust,n_nu_bins))
+             end if
              ! We store a copy of the initial specific energy in a separate
              ! array, and we set the specific energy to the minimum specific
              ! energy. After the first iteration, specific_energy will get
              ! re-calculated and we will then add specific_energy_additional
              specific_energy_additional = specific_energy
+             if (compute_specific_energy_spectrum) then
+                specific_energy_additional_spectrum = specific_energy_spectrum
+             end if
              do id=1,n_dust
                 specific_energy(:,id) = minimum_specific_energy(id)
-             end do
+                
+                if (compute_specific_energy_spectrum) then
+                   do idx=1,n_nu_bins
+                      specific_energy_spectrum(:,id,idx) = minimum_specific_energy(id)
+                   end do
+                end if
+
+            end do
           end if
 
 
@@ -178,6 +245,13 @@ contains
           ! Set all specific_energy to minimum requested
           do id=1,n_dust
              specific_energy(:,id) = minimum_specific_energy(id)
+
+             if (compute_specific_energy_spectrum) then
+                do idx = 1,n_nu_bins
+                   specific_energy_spectrum(:,id,idx) = minimum_specific_energy(id)
+                end do
+             end if
+
           end do
 
        end if
@@ -190,6 +264,25 @@ contains
     ! Specific energy summation
     allocate(specific_energy_sum(geo%n_cells, n_dust))
     specific_energy_sum = 0._dp
+
+    ! Set up basics for the frequency-resolved specific energy
+    if (compute_specific_energy_spectrum) then
+       allocate(specific_energy_sum_spectrum(geo%n_cells, n_dust, n_nu_bins))
+       specific_energy_sum_spectrum = 0._dp
+    end if
+
+    ! Cache the frequency bins (and the log of the edges) once so they do
+    ! not have to be rebuilt for every photon. Photons are binned by
+    ! locating their frequency in the bin edges in log space (see
+    ! grid_propagate).
+    if (compute_specific_energy_spectrum) then
+       allocate(nu_bin_edges(n_nu_bins+1))
+       nu_bin_edges = specific_energy_spectrum_bin_edges
+       allocate(log_nu_bin_edges(n_nu_bins+1))
+       log_nu_bin_edges = log10(nu_bin_edges)
+
+       call setup_j_nu_bin_fractions()
+    end if
 
     ! Total energy absorbed
     allocate(energy_abs_tot(n_dust))
@@ -229,6 +322,78 @@ contains
 
   end subroutine setup_grid_physics
 
+  subroutine setup_j_nu_bin_fractions()
+
+    ! Pre-compute, for each dust type and emissivity state, the fraction of
+    ! the emissivity falling into each frequency bin, stored in
+    ! j_nu_bin_frac. This is used to distribute the energy deposited by the
+    ! MRW over the specific energy spectrum without sampling.
+
+    implicit none
+
+    integer :: id, iv, n_jnu_max
+
+    n_jnu_max = 0
+    do id=1,n_dust
+       n_jnu_max = max(n_jnu_max, d(id)%n_jnu)
+    end do
+    allocate(j_nu_bin_frac(size(nu_bin_edges)-1, n_jnu_max, n_dust))
+    j_nu_bin_frac = 0._dp
+    do id=1,n_dust
+       do iv=1,d(id)%n_jnu
+          j_nu_bin_frac(:, iv, id) = get_j_nu_bin_fractions(d(id), iv, nu_bin_edges)
+       end do
+    end do
+
+  end subroutine setup_j_nu_bin_fractions
+
+  subroutine scale_specific_energy_spectrum(ic, id, factor)
+
+    ! Multiply the frequency-resolved specific energy of a cell and dust
+    ! type by the given factor, preserving the spectral shape. Does nothing
+    ! if the frequency-resolved specific energy is not being computed.
+
+    implicit none
+
+    integer,intent(in) :: ic, id
+    real(dp),intent(in) :: factor
+
+    if(.not.compute_specific_energy_spectrum) return
+
+    specific_energy_spectrum(ic, id, :) = specific_energy_spectrum(ic, id, :) * factor
+
+  end subroutine scale_specific_energy_spectrum
+
+  subroutine deposit_specific_energy_spectrum(ic, id, energy)
+
+    ! Add energy to the frequency-resolved specific energy of a cell and
+    ! dust type, distributed over the frequency bins according to the local
+    ! emissivity (pre-computed in j_nu_bin_frac), interpolating between the
+    ! two adjacent emissivity states. This is used by the MRW, for which
+    ! the radiation field is Planckian, so the absorbed energy is
+    ! distributed in frequency as kappa_nu * B_nu, which is the local
+    ! emissivity. No frequency sampling is involved, so computing the
+    ! spectrum does not affect the random number stream. Does nothing if
+    ! the frequency-resolved specific energy is not being computed.
+
+    implicit none
+
+    integer,intent(in) :: ic, id
+    real(dp),intent(in) :: energy
+
+    integer :: iv
+    real(dp) :: fr
+
+    if(.not.compute_specific_energy_spectrum) return
+
+    iv = jnu_var_id(ic, id)
+    fr = jnu_var_frac(ic, id)
+
+    specific_energy_sum_spectrum(ic, id, :) = specific_energy_sum_spectrum(ic, id, :) &
+         & + energy * ((1._dp - fr) * j_nu_bin_frac(:, iv, id) + fr * j_nu_bin_frac(:, iv + 1, id))
+
+  end subroutine deposit_specific_energy_spectrum
+
   subroutine update_alpha_inv_planck()
 
     ! Optimization: could pre-compute alpha_inv_planck just for masked (valid) cells
@@ -257,10 +422,14 @@ contains
     implicit none
     integer :: ic, id
     integer :: reset
+    integer :: n_nu_bins
 
-    reset = 0
+    n_nu_bins = 0
+    if (compute_specific_energy_spectrum) n_nu_bins = size(specific_energy_spectrum, 3)
 
     do id=1,n_dust
+
+       reset = 0
 
        select case(d(id)%sublimation_mode)
        case(1)
@@ -270,7 +439,15 @@ contains
                 density(ic, id) = 0.
                 specific_energy(ic, id) = minimum_specific_energy(id)
                 reset = reset + 1
+
+                if (compute_specific_energy_spectrum) then
+                   do idx=1,n_nu_bins
+                      specific_energy_spectrum(ic,id,idx) = minimum_specific_energy(id)
+                   end do
+                end if
+
              end if
+             
           end do
           if(reset > 0) write(*,'(" [sublimate_dust] dust removed in ",I0," cells")') reset
 
@@ -282,8 +459,13 @@ contains
                      & * d(id)%sublimation_specific_energy / specific_energy(ic, id) &
                      & * (chi_rosseland(id, specific_energy(ic,id)) &
                      & / chi_rosseland(id, d(id)%sublimation_specific_energy))**2
+
+                call scale_specific_energy_spectrum(ic, id, &
+                     & d(id)%sublimation_specific_energy / specific_energy(ic, id))
+
                 specific_energy(ic,id) = d(id)%sublimation_specific_energy
                 reset = reset + 1
+
              end if
           end do
 
@@ -293,8 +475,13 @@ contains
 
           do ic=1,geo%n_cells
              if(specific_energy(ic, id) > d(id)%sublimation_specific_energy) then
+
+                call scale_specific_energy_spectrum(ic, id, &
+                     & d(id)%sublimation_specific_energy / specific_energy(ic, id))
+
                 specific_energy(ic, id) = d(id)%sublimation_specific_energy
                 reset = reset + 1
+
              end if
           end do
 
@@ -316,12 +503,27 @@ contains
 
     real(dp), intent(in) :: scale
 
-    integer :: id
+    integer :: id,idx
+    integer :: n_nu_bins
+
+    n_nu_bins = 0
+    if (compute_specific_energy_spectrum) n_nu_bins = size(specific_energy_spectrum, 3)
 
     if(main_process()) write(*,'(" [grid_physics] updating energy_abs")')
 
     do id=1,n_dust
        specific_energy(:,id) = specific_energy_sum(:,id) * scale / geo%volume
+       
+       if (compute_specific_energy_spectrum) then
+          do idx=1,n_nu_bins
+             specific_energy_spectrum(:,id,idx) = specific_energy_sum_spectrum(:,id,idx) * scale/geo%volume
+             where(geo%volume == 0._dp)
+                specific_energy_spectrum(:,id,idx) = 0._dp
+             end where
+          end do
+       end if
+
+
        where(geo%volume == 0._dp)
           specific_energy(:,id) = 0._dp
        end where
@@ -331,10 +533,17 @@ contains
        write(*,'(" [update_energy_abs] ",I0," cells have no energy")') count(specific_energy==0.and.density>0.)
     end if
 
+
     ! Add in additional source of heating
     if(trim(specific_energy_type) == 'additional') then
        if(main_process()) write(*,'(" [grid_physics] adding additional heating source")')
        specific_energy = specific_energy + specific_energy_additional
+
+       
+       if (compute_specific_energy_spectrum) then 
+          specific_energy_spectrum = specific_energy_spectrum + specific_energy_additional_spectrum
+       end if
+
     end if
 
     call update_energy_abs_tot()
@@ -357,7 +566,10 @@ contains
           if(main_process()) call warn("update_energy_abs","specific_energy below minimum requested in some cells - resetting")
           where(specific_energy(:,id) < minimum_specific_energy(id))
              specific_energy(:,id) = minimum_specific_energy(id)
+             
+ 
           end where
+
        end if
 
        if(any(specific_energy(:,id) < d(id)%specific_energy(1))) then
@@ -365,7 +577,8 @@ contains
              if(main_process()) call warn("update_energy_abs","specific_energy below minimum allowed in some cells - resetting")
              where(specific_energy(:,id) < d(id)%specific_energy(1))
                 specific_energy(:,id) = d(id)%specific_energy(1)
-             end where
+                
+              end where
           else
              if(main_process()) call warn("update_energy_abs","specific_energy below minimum allowed in some cells - will pick closest emissivities")
           end if
@@ -376,6 +589,7 @@ contains
              if(main_process()) call warn("update_energy_abs","specific_energy above maximum allowed in some cells - resetting")
              where(specific_energy(:,id) > d(id)%specific_energy(d(id)%n_e))
                 specific_energy(:,id) = d(id)%specific_energy(d(id)%n_e)
+
              end where
           else
              if(main_process()) call warn("update_energy_abs","specific_energy above maximum allowed in some cells - will pick closest emissivities")
@@ -495,7 +709,7 @@ contains
     end if
 
     call random(xi)
-    p%dust_id = ceiling(xi*real(n_dust,dp))
+    p%dust_id = max(ceiling(xi*real(n_dust,dp)), 1)
 
     ! Pick random cell
     p%icell = random_masked_cell()
