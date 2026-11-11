@@ -1,9 +1,9 @@
 # Test that parameters are preserved when written out and read in again
 
-from __future__ import print_function, division
 
 from itertools import product
 
+import numpy as np
 from numpy.testing import assert_equal
 import pytest
 
@@ -13,7 +13,8 @@ from ...util.functions import virtual_file
 
 @pytest.mark.parametrize(('attribute', 'value'),
                          list(product(['output_density', 'output_density_diff',
-                                       'output_specific_energy', 'output_n_photons'],
+                                       'output_specific_energy', 'output_specific_energy_spectrum',
+                                       'output_n_photons'],
                                       ['none', 'last', 'all'])))
 def test_io_output_conf(attribute, value):
     o1 = OutputConf()
@@ -249,6 +250,27 @@ def test_io_run_conf_mrw(value):
     r2.read_run_conf(v)
     assert r2.mrw == r1.mrw
 
+def test_io_run_conf_specific_energy_spectrum_edges():
+    r1 = RunConf()
+    r1.set_specific_energy_spectrum_bins(np.logspace(11., 16., 10))
+    r1.set_n_photons(1, 2)
+    v = virtual_file()
+    r1.write_run_conf(v)
+    r2 = RunConf()
+    r2.read_run_conf(v)
+    np.testing.assert_allclose(r2.specific_energy_spectrum_bin_edges,
+                               r1.specific_energy_spectrum_bin_edges)
+
+def test_io_run_conf_specific_energy_spectrum_invalid():
+    r1 = RunConf()
+    with pytest.raises(TypeError):
+        r1.set_specific_energy_spectrum_bins()
+    with pytest.raises(ValueError, match='at least two'):
+        r1.set_specific_energy_spectrum_bins([1.])
+    with pytest.raises(ValueError, match='strictly increasing'):
+        r1.set_specific_energy_spectrum_bins([1., 3., 2.])
+    with pytest.raises(ValueError, match='positive'):
+        r1.set_specific_energy_spectrum_bins([-1., 2.])
 
 @pytest.mark.parametrize(('value'), [False, True])
 def test_io_run_conf_convergence(value):

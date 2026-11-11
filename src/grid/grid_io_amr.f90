@@ -1,4 +1,4 @@
-! MD5 of template: a9d1b24b38764cb05db2f7aeda80e7ca
+! MD5 of template: fe55a2c227b277e3b81bf41dc7696fa9
 module grid_io
 
   use core_lib
@@ -14,6 +14,8 @@ module grid_io
   public :: read_grid_4d
   public :: write_grid_3d
   public :: write_grid_4d
+  public :: write_grid_5d
+
 
   interface read_grid_3d
      module procedure read_grid_3d_sp
@@ -42,6 +44,14 @@ module grid_io
      module procedure write_grid_4d_int
      module procedure write_grid_4d_int8
   end interface write_grid_4d
+
+  interface write_grid_5d
+     module procedure write_grid_5d_sp
+     module procedure write_grid_5d_dp
+     module procedure write_grid_5d_int
+     module procedure write_grid_5d_int8
+  end interface write_grid_5d
+  
 
 contains
 
@@ -126,7 +136,7 @@ contains
        level => geo%levels(ilevel)
        do igrid=1,size(level%grids)
           grid => level%grids(igrid)
-          write(full_path, '("level_", I5.5, "/grid_ ", I5.5,"/")') ilevel, igrid
+          write(full_path, '("level_", I5.5, "/grid_", I5.5,"/")') ilevel, igrid
           full_path = trim(full_path)//trim(path)
           call mp_read_array_auto(group, full_path, array3d)
           if(any(is_nan(array3d))) call error("read_grid_3d", "NaN values in 3D array")
@@ -145,6 +155,52 @@ contains
     end subroutine test
 
   end subroutine read_grid_3d_int8
+
+
+
+    subroutine write_grid_5d_int8(group, path, array, geo)
+
+    implicit none
+
+    integer(hid_t), intent(in) :: group
+    character(len=*), intent(in) :: path
+    integer(idp), intent(in) :: array(:,:,:)
+    type(grid_geometry_desc),intent(in),target :: geo
+    integer(hid_t) :: g_level, g_grid
+    character(len=100) :: name
+    integer :: ilevel, igrid
+    type(level_desc), pointer :: level
+    type(grid_desc), pointer :: grid
+
+    do ilevel=1,size(geo%levels)
+       level => geo%levels(ilevel)
+       write(name, '("level_", I5.5)') ilevel
+       if(mp_path_exists(group, name)) then
+          g_level = mp_open_group(group, name)
+       else
+          g_level = mp_create_group(group, name)
+       end if
+       do igrid=1,size(level%grids)
+          grid => level%grids(igrid)
+          write(name, '("grid_", I5.5)') igrid
+          if(mp_path_exists(g_level, name)) then
+             g_grid = mp_open_group(g_level, name)
+          else
+             g_grid = mp_create_group(g_level, name)
+          end if
+
+          call mp_write_array(g_grid, path, reshape(array(grid%start_id:grid%start_id + grid%n_cells - 1, :,:), &
+               &                                     (/grid%n1, grid%n2, grid%n3, size(array,2), size(array,3)/)))
+          call mp_close_group(g_grid)
+       end do
+       call mp_close_group(g_level)
+
+    end do
+
+  end subroutine write_grid_5d_int8
+
+
+
 
   subroutine write_grid_4d_int8(group, path, array, geo)
 
@@ -226,6 +282,7 @@ contains
   end subroutine write_grid_3d_int8
 
 
+
   subroutine read_grid_4d_int(group, path, array, geo)
 
     implicit none
@@ -284,7 +341,7 @@ contains
        level => geo%levels(ilevel)
        do igrid=1,size(level%grids)
           grid => level%grids(igrid)
-          write(full_path, '("level_", I5.5, "/grid_ ", I5.5,"/")') ilevel, igrid
+          write(full_path, '("level_", I5.5, "/grid_", I5.5,"/")') ilevel, igrid
           full_path = trim(full_path)//trim(path)
           call mp_read_array_auto(group, full_path, array3d)
           if(any(is_nan(array3d))) call error("read_grid_3d", "NaN values in 3D array")
@@ -303,6 +360,47 @@ contains
     end subroutine test
 
   end subroutine read_grid_3d_int
+
+
+  subroutine write_grid_5d_int(group, path, array, geo)
+
+    implicit none
+
+    integer(hid_t), intent(in) :: group
+    character(len=*), intent(in) :: path
+    integer, intent(in) :: array(:,:,:)
+    type(grid_geometry_desc),intent(in),target :: geo
+    integer(hid_t) :: g_level, g_grid
+    character(len=100) :: name
+    integer :: ilevel, igrid
+    type(level_desc), pointer :: level
+    type(grid_desc), pointer :: grid
+
+    do ilevel=1,size(geo%levels)
+       level => geo%levels(ilevel)
+       write(name, '("level_", I5.5)') ilevel
+       if(mp_path_exists(group, name)) then
+          g_level = mp_open_group(group, name)
+       else
+          g_level = mp_create_group(group, name)
+       end if
+       do igrid=1,size(level%grids)
+          grid => level%grids(igrid)
+          write(name, '("grid_", I5.5)') igrid
+          if(mp_path_exists(g_level, name)) then
+             g_grid = mp_open_group(g_level, name)
+          else
+             g_grid = mp_create_group(g_level, name)
+          end if
+          call mp_write_array(g_grid, path, reshape(array(grid%start_id:grid%start_id + grid%n_cells - 1, :,:), &
+               &                                     (/grid%n1, grid%n2, grid%n3, size(array,2), size(array,3)/)))
+          call mp_close_group(g_grid)
+       end do
+       call mp_close_group(g_level)
+    end do
+    
+  end subroutine write_grid_5d_int
+
 
   subroutine write_grid_4d_int(group, path, array, geo)
 
@@ -442,7 +540,7 @@ contains
        level => geo%levels(ilevel)
        do igrid=1,size(level%grids)
           grid => level%grids(igrid)
-          write(full_path, '("level_", I5.5, "/grid_ ", I5.5,"/")') ilevel, igrid
+          write(full_path, '("level_", I5.5, "/grid_", I5.5,"/")') ilevel, igrid
           full_path = trim(full_path)//trim(path)
           call mp_read_array_auto(group, full_path, array3d)
           if(any(is_nan(array3d))) call error("read_grid_3d", "NaN values in 3D array")
@@ -461,6 +559,48 @@ contains
     end subroutine test
 
   end subroutine read_grid_3d_dp
+
+
+
+  subroutine write_grid_5d_dp(group, path, array, geo)
+
+    implicit none
+
+    integer(hid_t), intent(in) :: group
+    character(len=*), intent(in) :: path
+    real(dp), intent(in) :: array(:,:,:)
+    type(grid_geometry_desc),intent(in),target :: geo
+    integer(hid_t) :: g_level, g_grid
+    character(len=100) :: name
+    integer :: ilevel, igrid
+    type(level_desc), pointer :: level
+    type(grid_desc), pointer :: grid
+
+    do ilevel=1,size(geo%levels)
+       level => geo%levels(ilevel)
+       write(name, '("level_", I5.5)') ilevel
+       if(mp_path_exists(group, name)) then
+          g_level = mp_open_group(group, name)
+       else
+          g_level = mp_create_group(group, name)
+       end if
+       do igrid=1,size(level%grids)
+          grid => level%grids(igrid)
+          write(name, '("grid_", I5.5)') igrid
+          if(mp_path_exists(g_level, name)) then
+             g_grid = mp_open_group(g_level, name)
+          else
+             g_grid = mp_create_group(g_level, name)
+          end if
+          call mp_write_array(g_grid, path, reshape(array(grid%start_id:grid%start_id + grid%n_cells - 1, :, :), &
+               &                                     (/grid%n1, grid%n2, grid%n3, size(array,2), size(array,3)/)))
+          call mp_close_group(g_grid)
+       end do
+       call mp_close_group(g_level)
+    end do
+
+  end subroutine write_grid_5d_dp
+
 
   subroutine write_grid_4d_dp(group, path, array, geo)
 
@@ -600,7 +740,7 @@ contains
        level => geo%levels(ilevel)
        do igrid=1,size(level%grids)
           grid => level%grids(igrid)
-          write(full_path, '("level_", I5.5, "/grid_ ", I5.5,"/")') ilevel, igrid
+          write(full_path, '("level_", I5.5, "/grid_", I5.5,"/")') ilevel, igrid
           full_path = trim(full_path)//trim(path)
           call mp_read_array_auto(group, full_path, array3d)
           if(any(is_nan(array3d))) call error("read_grid_3d", "NaN values in 3D array")
@@ -619,6 +759,49 @@ contains
     end subroutine test
 
   end subroutine read_grid_3d_sp
+
+
+
+  subroutine write_grid_5d_sp(group, path, array, geo)
+
+    implicit none
+
+    integer(hid_t), intent(in) :: group
+    character(len=*), intent(in) :: path
+    real(sp), intent(in) :: array(:,:,:)
+    type(grid_geometry_desc),intent(in),target :: geo
+    integer(hid_t) :: g_level, g_grid
+    character(len=100) :: name
+    integer :: ilevel, igrid
+    type(level_desc), pointer :: level
+    type(grid_desc), pointer :: grid
+
+    do ilevel=1,size(geo%levels)
+       level => geo%levels(ilevel)
+       write(name, '("level_", I5.5)') ilevel
+       if(mp_path_exists(group, name)) then
+          g_level = mp_open_group(group, name)
+       else
+          g_level = mp_create_group(group, name)
+       end if
+       do igrid=1,size(level%grids)
+          grid => level%grids(igrid)
+          write(name, '("grid_", I5.5)') igrid
+          if(mp_path_exists(g_level, name)) then
+             g_grid = mp_open_group(g_level, name)
+          else
+             g_grid = mp_create_group(g_level, name)
+          end if
+          call mp_write_array(g_grid, path, reshape(array(grid%start_id:grid%start_id + grid%n_cells - 1, :, :), &
+               &                                     (/grid%n1, grid%n2, grid%n3, size(array,2),size(array,3)/)))
+          call mp_close_group(g_grid)
+       end do
+       call mp_close_group(g_level)
+    end do
+
+  end subroutine write_grid_5d_sp
+
+
 
   subroutine write_grid_4d_sp(group, path, array, geo)
 
