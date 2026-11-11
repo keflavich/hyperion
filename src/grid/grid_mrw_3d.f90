@@ -6,7 +6,7 @@ module grid_mrw
   use type_photon
   use grid_geometry
   use grid_physics
-  use dust_main, only : kappa_planck, chi_inv_planck, n_dust, d
+  use dust_main, only : kappa_planck, chi_inv_planck, n_dust, d, update_optconsts
   use type_dust, only : dust_sample_b_nu
 
   implicit none
@@ -19,6 +19,12 @@ module grid_mrw
   public :: mrw_peeloff
 
   logical :: debug = .false.
+
+  ! Patch: stock Hyperion resamples the photon frequency at the end of an MRW
+  ! step without updating its optical constants, so the next flight and
+  ! interaction use the opacity and albedo of the frequency the photon had
+  ! before the MRW step.  env HYPERION_MRW_OPTCONSTS=1 updates them.
+  logical :: mrw_optconsts = .false.
 
   integer,parameter :: ncdf = 100
   real(dp) :: xcdf(ncdf), ycdf(ncdf)
@@ -36,7 +42,13 @@ contains
     real(dp) :: total_alpha_inv_planck
     ! eta_nu values have been read into dust type
 
+    character(len=16) :: value
+    integer :: length, status
+
     call initialize_cumulative()
+
+    call get_environment_variable('HYPERION_MRW_OPTCONSTS', value, length, status)
+    mrw_optconsts = status == 0 .and. length > 0 .and. trim(value) == '1'
 
     if(.not.allocated(diff_coeff)) allocate(diff_coeff(geo%n_cells))
 
@@ -98,6 +110,7 @@ contains
 
     id = select_dust_chi_rho(p)
     call dust_sample_b_nu(d(id), jnu_var_id(p%icell%ic, id), jnu_var_frac(p%icell%ic, id), p%nu)
+    if(mrw_optconsts) call update_optconsts(p)
 
     ! For peeloff, we are going to assume that the radiation is isotropic.
     ! This is not quite exact, but is not likely to matter much.
@@ -136,6 +149,7 @@ contains
 
     id = select_dust_chi_rho(p)
     call dust_sample_b_nu(d(id), jnu_var_id(p%icell%ic, id), jnu_var_frac(p%icell%ic, id), p%nu)
+    if(mrw_optconsts) call update_optconsts(p)
 
     ! For peeloff, we are going to assume that the radiation is isotropic.
     ! This is not quite exact, but is not likely to matter much.
