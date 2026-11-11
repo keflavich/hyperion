@@ -1,8 +1,8 @@
-from __future__ import print_function, division
 
 import numpy as np
-import six
-from astropy import log as logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def almost_equal(a, b):
@@ -79,6 +79,9 @@ def amr_grid_to_yt_stream(levels, dust_id=0):
             grid_dict['level'] = ilevel
 
             for field in grid.quantities:
+                if not isinstance(grid.quantities[field], list):
+                    logger.warning("Skipping frequency-resolved quantity '{0}' in yt export (select a single frequency first)".format(field))
+                    continue
                 grid_dict[('gas', field)] = grid.quantities[field][dust_id].transpose()
 
             grid_data.append(grid_dict)
@@ -158,6 +161,9 @@ def octree_grid_to_yt_stream(grid, dust_id=0):
 
     quantities = {}
     for field in grid.quantities:
+        if not isinstance(grid.quantities[field], list):
+            logger.warning("Skipping frequency-resolved quantity '{0}' in yt export (select a single frequency first)".format(field))
+            continue
         quantities[('gas', field)] = np.atleast_2d(grid.quantities[field][dust_id][order][~refined]).transpose()
 
     bbox = np.array([[xmin, xmax], [ymin, ymax], [zmin, zmax]])
@@ -180,6 +186,9 @@ def cartesian_grid_to_yt_stream(grid, xmin, xmax, ymin, ymax, zmin, zmax, dust_i
     # Make data dict which should contain (array, unit) tuples
     data = {}
     for field in grid.quantities:
+        if not isinstance(grid.quantities[field], list):
+            logger.warning("Skipping frequency-resolved quantity '{0}' in yt export (select a single frequency first)".format(field))
+            continue
         data[field] = grid.quantities[field][dust_id].transpose(), ''
 
     # Load cartesian grid into yt
@@ -253,8 +262,8 @@ def yt_dataset_to_amr_grid(ds, quantity_mapping={}):
                          "in Hyperion and value is the name of the field in the "
                          "yt dataset. Available quantities are: \n\n    {0}".format(field_list))
 
-    for output_quantity, input_field in six.iteritems(quantity_mapping):
-        if not isinstance(output_quantity, six.string_types):
+    for output_quantity, input_field in quantity_mapping.items():
+        if not isinstance(output_quantity, str):
             raise ValueError("quantity_mapping keys should be strings")
         if input_field not in ds.derived_field_list:
             raise ValueError("yt field {0} does not exist. Available fields "
@@ -303,7 +312,7 @@ def yt_dataset_to_amr_grid(ds, quantity_mapping={}):
 
             grid.nz, grid.ny, grid.nx = yt_grid.shape
 
-            for output_quantity, input_field in six.iteritems(quantity_mapping):
+            for output_quantity, input_field in quantity_mapping.items():
                 grid.quantities[output_quantity] = yt_grid[input_field].in_units('g/cm**3').ndarray_view()
 
     return amr

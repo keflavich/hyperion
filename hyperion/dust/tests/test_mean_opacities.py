@@ -1,4 +1,3 @@
-from __future__ import print_function, division
 
 import matplotlib.pyplot as plt
 
@@ -78,4 +77,7 @@ def test_zero_emissivities():
     o.albedo = np.array([0., 0.5])
 
     m = MeanOpacities()
-    m.compute(o)
+    # The zero emissivities deliberately cause zero-divided-by-zero in the
+    # mean opacity integrals, so ignore the resulting warnings.
+    with np.errstate(invalid='ignore'):
+        m.compute(o)

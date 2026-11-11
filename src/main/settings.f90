@@ -20,7 +20,7 @@ module settings
   integer(idp),public :: n_last_photons_dust = 0
   integer(idp),public :: n_raytracing_photons_sources = 0
   integer(idp),public :: n_raytracing_photons_dust = 0
-  logical,public :: use_raytracing, use_mrw, use_pda
+  logical,public :: use_raytracing, use_mrw, use_pda, compute_specific_energy_spectrum
   logical, public :: kill_on_absorb, kill_on_scatter
   real(dp),public :: mrw_gamma
   logical, public :: forced_first_interaction
@@ -30,11 +30,17 @@ module settings
   real(dp) :: monochromatic_energy_threshold
   real(dp),allocatable :: frequencies(:)
 
+  ! Frequency bin edges for specific_energy_spectrum, provided by the Python
+  ! frontend. The edges define the binning: photons outside the outer edges
+  ! are not counted.
+  real(dp),allocatable :: specific_energy_spectrum_bin_edges(:)
+
   integer :: physics_io_type
 
   character(len=4) :: output_density
   character(len=4) :: output_density_diff
   character(len=4) :: output_specific_energy
+  character(len=4) :: output_specific_energy_spectrum
   character(len=4) :: output_n_photons
 
   logical :: check_convergence = .false.
