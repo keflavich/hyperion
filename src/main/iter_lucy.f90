@@ -6,7 +6,8 @@ module iteration_lucy
 
   use sources, only : emit, energy_current, energy_total
 
-  use mpi_core, only : main_process, mp_join
+  use mpi_core, only : main_process, mp_join, rank
+  use grid_geometry, only : geo
   use mpi_routines, only : mp_reset_first, &
        &                   mp_n_photons, &
        &                   mp_sync, &
@@ -86,6 +87,18 @@ contains
     ! REMOVE
     real(dp) :: tau_achieved
 
+    ! Interaction map (patch, env HYPERION_INTERACTION_MAP=<prefix>): per-cell
+    ! counts of scatterings, absorptions and MRW steps for all photons and for
+    ! interactions beyond the LONG_INT-th of a photon history, plus a histogram
+    ! of interactions per photon; each rank writes <prefix>_iterNN_rankNNN.bin
+    integer, parameter :: LONG_INT = 10000
+    logical, save :: imap_checked = .false., imap_on = .false.
+    character(len=512), save :: imap_prefix
+    integer, save :: imap_iter = 0
+    integer(8), allocatable :: imap(:,:), ihist(:)
+    integer :: imap_len, imap_status, imap_u, ib, ic_before
+    character(len=600) :: imap_file
+
     if(n_photons_tot == 0) then
        if(main_process()) then
           write(*,*)
@@ -109,6 +122,19 @@ contains
     if(use_mrw) then
        call update_alpha_inv_planck()
        call prepare_mrw()
+    end if
+
+    if(.not.imap_checked) then
+       call get_environment_variable('HYPERION_INTERACTION_MAP', imap_prefix, imap_len, imap_status)
+       imap_on = imap_status == 0 .and. imap_len > 0
+       imap_checked = .true.
+    end if
+    if(imap_on) then
+       imap_iter = imap_iter + 1
+       ! columns: 1 scat, 2 abs, 3 mrw (all), 4 scat, 5 abs, 6 mrw (beyond LONG_INT)
+       allocate(imap(geo%n_cells, 6), ihist(0:20))
+       imap = 0
+       ihist = 0
     end if
 
     call mp_join()
@@ -138,6 +164,10 @@ contains
              if(use_mrw.and.interactions > 1) then
                 do mrw_steps=1,n_mrw_max
                    if(tau_inv_planck_to_closest_wall(p) > mrw_gamma) then
+                      if(imap_on) then
+                         imap(p%icell%ic, 3) = imap(p%icell%ic, 3) + 1
+                         if(interactions > LONG_INT) imap(p%icell%ic, 6) = imap(p%icell%ic, 6) + 1
+                      end if
                       call grid_do_mrw(p)
                    else
                       exit
@@ -198,15 +228,34 @@ contains
              end if
 
              ! Absorb & re-emit, or scatter
+             ic_before = p%icell%ic
              call interact(p)
+             if(imap_on) then
+                ib = merge(1, 2, p%scattered)
+                imap(ic_before, ib) = imap(ic_before, ib) + 1
+                if(interactions > LONG_INT) imap(ic_before, ib + 3) = imap(ic_before, ib + 3) + 1
+             end if
              p%killed = (kill_on_scatter .and. p%scattered) .or. (kill_on_absorb .and. .not.p%scattered)
              if(p%killed) exit
 
           end do
 
+          if(imap_on) then
+             ib = min(20, int(log10(real(max(interactions, 1), dp)) * 2._dp))
+             ihist(ib) = ihist(ib) + 1
+          end if
+
        end do
 
     end do
+
+    if(imap_on) then
+       write(imap_file, '(A,"_iter",I2.2,"_rank",I3.3,".bin")') trim(imap_prefix), imap_iter, rank
+       open(newunit=imap_u, file=trim(imap_file), access='stream', form='unformatted', status='replace')
+       write(imap_u) int(geo%n_cells, 8), imap, ihist
+       close(imap_u)
+       deallocate(imap, ihist)
+    end if
 
     call mp_join()
 
