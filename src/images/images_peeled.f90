@@ -40,6 +40,7 @@ module peeled_images
 
   logical,allocatable :: inside_observer(:)
   logical,allocatable :: ignore_optical_depth(:)
+  real(dp) :: peeloff_tau_max = huge(1._dp)
   type(vector3d_dp), allocatable :: r_peeloff(:)
   type(angle3d_dp), allocatable :: viewing_angles(:)
   ! angles in which to make peeled images
@@ -201,7 +202,7 @@ contains
              if(polychromatic) then
                 call grid_escape_column_density(p,tmax,column_density,killed)
              else
-                call grid_escape_tau(p,tmax,tau,killed)
+                call grid_escape_tau(p,tmax,tau,killed,tau_max=peeloff_tau_max)
              end if
           end if
 
@@ -266,6 +267,14 @@ contains
     real(dp),allocatable :: theta(:), phi(:)
 
     n_groups = size(paths)
+
+    block
+      character(len=64) :: envval
+      integer :: envlen, envstat
+      call get_environment_variable('HYPERION_PEELOFF_TAU_MAX', envval, envlen, envstat)
+      if(envstat == 0 .and. envlen > 0) read(envval, *) peeloff_tau_max
+      if(main_process()) write(*,'(" [peeled_images] peel-off tau cutoff = ",ES10.3)') peeloff_tau_max
+    end block
 
     allocate(peeled_image(n_groups))
     allocate(peeled_image_sum(n_groups))
