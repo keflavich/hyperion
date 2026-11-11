@@ -29,6 +29,10 @@ module iteration_final
 
   use grid_mrw, only : prepare_mrw, grid_do_mrw_noenergy
 
+  use grid_monochromatic, only : setup_dust_photon_pdfs, emit_dust_photon
+
+  use dust_main, only : n_dust
+
   use settings, only : forced_first_interaction, &
        &               forced_first_interaction_algorithm, &
        &               kill_on_absorb, kill_on_scatter, &
@@ -142,7 +146,91 @@ contains
     if(make_binned_images) call binned_images_adjust_scale(energy_total/energy_current)
     if(make_peeled_images) call peeled_images_adjust_scale(energy_total/energy_current)
 
+    call do_dust_photon_pass(n_photons_chunk, peeloff_scattering_only)
+
   end subroutine do_final
+
+  subroutine do_dust_photon_pass(n_photons_chunk, peeloff_scattering_only)
+
+    ! Polychromatic dust-photon pass (patch, env HYPERION_DUST_PHOTONS = number
+    ! of photons).  With kill_on_absorb the source photons of do_final stop at
+    ! their first absorption, so the light that dust emits and dust then
+    ! scatters (which the absorb/re-emit chains of a stock run carry) is
+    ! missing.  This pass emits that light directly: photons drawn from the
+    ! final dust emissivity in proportion to cell luminosity, each with an
+    ! equal share of the total dust luminosity, propagated until absorbed
+    ! (killed) or escaped, peeled off at scatterings (raytracing on) or at
+    ! every interaction (raytracing off).  The images were already scaled to
+    ! absolute energies above, so the photons carry absolute energies (as in
+    ! do_raytracing).
+
+    implicit none
+
+    integer(idp),intent(in) :: n_photons_chunk
+    logical,intent(in) :: peeloff_scattering_only
+
+    integer(idp) :: n_photons_tot, n_photons, n_photons_curr
+    integer :: ip, length, status
+    character(len=64) :: value
+    real(dp) :: n_real, lum_total, bias, bias_wav
+    type(photon) :: p
+
+    call get_environment_variable('HYPERION_DUST_PHOTONS', value, length, status)
+    if(status /= 0 .or. length == 0) return
+    read(value, *) n_real
+    n_photons_tot = nint(n_real, idp)
+    if(n_photons_tot <= 0 .or. n_dust == 0) return
+
+    if(.not.kill_on_absorb) call error('do_final', 'HYPERION_DUST_PHOTONS requires kill_on_absorb')
+    if(.not.make_peeled_images) return
+
+    ! optional hot-dust bias (fraction of photons drawn by luminosity
+    ! shortward of HYPERION_DUST_PHOTONS_BIAS_WAV microns, default 20)
+    bias = 0._dp
+    bias_wav = 20._dp
+    call get_environment_variable('HYPERION_DUST_PHOTONS_BIAS', value, length, status)
+    if(status == 0 .and. length > 0) read(value, *) bias
+    call get_environment_variable('HYPERION_DUST_PHOTONS_BIAS_WAV', value, length, status)
+    if(status == 0 .and. length > 0) read(value, *) bias_wav
+    if(bias < 0._dp .or. bias >= 1._dp) call error('do_final', 'HYPERION_DUST_PHOTONS_BIAS must be in [0, 1)')
+
+    lum_total = setup_dust_photon_pdfs(bias, bias_wav)
+    if(lum_total <= 0._dp) return
+
+    if(main_process()) write(*,'(" [do_final] dust-photon pass: ",I0," photons, dust luminosity ",ES11.4," ergs/s")') &
+         & n_photons_tot, lum_total
+    if(main_process() .and. bias > 0._dp) write(*,'(" [do_final] dust-photon bias: fraction ",F6.3," below ",F8.2," microns")') &
+         & bias, bias_wav
+
+    n_photons_curr = 0
+    call mp_reset_first()
+    call mp_join()
+    if(main_process()) call perf_header()
+
+    do
+
+       call mp_n_photons(n_photons_tot, n_photons_curr, n_photons_chunk, n_photons)
+
+       if(n_photons==0) exit
+
+       do ip=1,n_photons
+
+          p = emit_dust_photon()
+          p%energy = p%energy * lum_total / dble(n_photons_tot)
+
+          if(.not.peeloff_scattering_only) call peeloff_photon(p, polychromatic=.false.)
+
+          call propagate(p, peeloff_scattering_only)
+
+       end do
+
+    end do
+
+    call mp_join()
+
+    if(main_process()) call perf_footer()
+
+  end subroutine do_dust_photon_pass
 
   subroutine propagate(p,peeloff_scattering_only)
 
