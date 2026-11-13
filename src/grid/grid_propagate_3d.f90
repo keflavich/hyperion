@@ -5,10 +5,10 @@ module grid_propagate
   use type_grid_cell
   use dust_main, only : n_dust
   use grid_geometry, only : escaped, find_wall, in_correct_cell, next_cell, opposite_wall
-  use grid_physics, only : specific_energy_sum, density, n_photons, last_photon_id
+  use grid_physics, only : specific_energy_sum, specific_energy_sum_spectrum, log_nu_bin_edges, density, n_photons, last_photon_id
   use sources
   use counters
-  use settings, only : frac_check => propagation_check_frequency
+  use settings, only : frac_check => propagation_check_frequency, compute_specific_energy_spectrum
 
   implicit none
   save
@@ -57,6 +57,19 @@ contains
 
     integer :: source_id
 
+    integer :: idx
+
+    ! The photon frequency does not change within a single grid_integrate call
+    ! (re-emission and scattering happen between calls, which is also when the
+    ! cached opacities in p%current_kappa are refreshed), so the frequency bin
+    ! only needs to be found once per call rather than at every cell crossing.
+    ! locate returns -1 for photons outside the outer bin edges, which are
+    ! not counted in the spectrum. idx is set to -1 up front so the deposit
+    ! guards below (idx > 0) are always reading a defined value, including
+    ! when the frequency-resolved spectrum is not being computed.
+    idx = -1
+    if (compute_specific_energy_spectrum) idx = locate(log_nu_bin_edges, log10(p%nu))
+
     radial = (p%r .dot. p%v) > 0.
 
     if(debug) write(*,'(" [debug] start grid_integrate")')
@@ -68,6 +81,11 @@ contains
     ! Find what cell we are in if we don't know
 
     if(.not.p%in_cell) call error("grid_integrate", "photon has not been placed in a cell")
+
+    ! A photon emitted exactly on the outer edge of the grid moving outwards
+    ! is placed by adjust_wall in the cell just outside the grid, so it
+    ! escapes immediately without crossing any walls.
+    if(escaped(p)) return
 
     if(allocated(n_photons)) then
        if(last_photon_id(p%icell%ic).ne.p%id) then
@@ -130,14 +148,18 @@ contains
           p%r = p%r + tmin * p%v
           tau_achieved = tau_achieved + tau_cell
 
-          ! NEED INDIVIDUAL ALPHA HERE
-
           do id=1,n_dust
              if(density(p%icell%ic, id) > 0._dp) then
                 specific_energy_sum(p%icell%ic, id) = &
                      & specific_energy_sum(p%icell%ic, id) + tmin * p%current_kappa(id) * p%energy
+                if (compute_specific_energy_spectrum .and. idx > 0) then
+                   specific_energy_sum_spectrum(p%icell%ic, id, idx) = &
+                        & specific_energy_sum_spectrum(p%icell%ic, id, idx) + tmin * p%current_kappa(id) * p%energy
+                end if
              end if
           end do
+
+
 
           p%on_wall = .true.
           p%icell = next_cell(p%icell, id_min, intersection=p%r)
@@ -186,6 +208,22 @@ contains
              end if
           end do
 
+          ! Deposit the same energy in the frequency-resolved spectrum.
+          ! Without this, the energy deposited over the partial path to
+          ! each interaction point is counted in the scalar specific
+          ! energy but missing from the binned spectrum, which biases
+          ! the spectrum low in any cell optically thick enough for
+          ! photons to interact within a single crossing.
+          if (compute_specific_energy_spectrum .and. idx > 0) then
+             do id=1,n_dust
+                if(density(p%icell%ic, id) > 0._dp) then
+                   specific_energy_sum_spectrum(p%icell%ic, id, idx) = &
+                        & specific_energy_sum_spectrum(p%icell%ic, id, idx) &
+                        & + tact * p%current_kappa(id) * p%energy
+                end if
+             end do
+          end if
+
           if(debug) write(*,'(" [debug] end grid_integrate")')
           return
 
@@ -233,6 +271,11 @@ contains
 
     if(.not.p%in_cell) call error("grid_integrate_noenergy", "photon has not been placed in a cell")
 
+    ! A photon emitted exactly on the outer edge of the grid moving outwards
+    ! is placed by adjust_wall in the cell just outside the grid, so it
+    ! escapes immediately without crossing any walls.
+    if(escaped(p)) return
+
     if(tau_required==0._dp) return
 
     ! Check what the distance to the nearest source is
@@ -271,6 +314,8 @@ contains
        do id=1,n_dust
           chi_rho_total = chi_rho_total + p%current_chi(id) * density(p%icell%ic, id)
        end do
+
+
        tau_cell = chi_rho_total * tmin
 
        if(tau_cell < tau_needed) then
@@ -359,6 +404,14 @@ contains
     ! Find what cell we are in if we don't know
 
     if(.not.p%in_cell) call error("grid_escape_tau", "photon has not been placed in a cell")
+
+    ! A photon emitted exactly on the outer edge of the grid moving outwards
+    ! is placed by adjust_wall in the cell just outside the grid, so it
+    ! escapes immediately without crossing any walls.
+    if(escaped(p)) then
+       tau = 0._dp
+       return
+    end if
 
     ! Check what the distance to the nearest source is
 
@@ -456,6 +509,14 @@ contains
     ! Find what cell we are in if we don't know
 
     if(.not.p%in_cell) call error("grid_escape_column_density", "photon has not been placed in a cell")
+
+    ! A photon emitted exactly on the outer edge of the grid moving outwards
+    ! is placed by adjust_wall in the cell just outside the grid, so it
+    ! escapes immediately without crossing any walls.
+    if(escaped(p)) then
+       column_density = 0._dp
+       return
+    end if
 
     ! Check what the distance to the nearest source is
 

@@ -1,4 +1,3 @@
-from __future__ import print_function, division
 
 import struct
 import hashlib
@@ -7,11 +6,13 @@ from copy import deepcopy
 import h5py
 import numpy as np
 
-from astropy import log as logger
+import logging
 from astropy.table import Table
 
 from ..util.functions import FreezableClass, is_numpy_array, link_or_copy, as_str
 from .grid_helpers import single_grid_dims
+
+logger = logging.getLogger(__name__)
 
 
 class VoronoiGrid(FreezableClass):
@@ -203,20 +204,21 @@ class VoronoiGrid(FreezableClass):
         else:
             single = False
 
-        # reduceat does not recognize values of indices that are the size of
-        # the array so we need to subtract one here for those values.
-        idx = self._samples_idx.copy()
-        idx[idx == len(values_all[0])] -= 1
+        # reduceat does not accept indices equal to the size of the array
+        # (which occur for empty cells at the end of the grid) and for two
+        # consecutive equal index values (empty cells) it returns the value
+        # at that index rather than 0, so we only pass the start indices of
+        # the non-empty cells and explicitly set the average to 0 for empty
+        # cells.
+        counts = np.diff(self._samples_idx)
+        non_empty = counts > 0
+        starts = self._samples_idx[:-1][non_empty]
 
         averages_all = []
 
         for values in values_all:
-            averages = np.add.reduceat(values, idx[:-1]) / np.diff(idx)
-
-            # reduceat doesn't do what we want for two consecutive equal
-            # index values - it will take the value at that index rather than
-            # return 0 (which is what would be expected for i:i slicing)
-            averages[np.isinf(averages)] = 0.
+            averages = np.zeros(len(counts))
+            averages[non_empty] = np.add.reduceat(values, starts) / counts[non_empty]
             averages_all.append(averages)
 
         if single:
@@ -396,6 +398,8 @@ class VoronoiGrid(FreezableClass):
         # Read in physical quantities
         if quantities is not None:
             for quantity in group:
+                if quantity == 'specific_energy_spectrum_bin_edges':
+                    continue  # per-frequency metadata, not a per-cell grid quantity
                 if quantities == 'all' or quantity in quantities:
                     array = np.array(group[quantity])
                     if array.ndim == 2:  # if array is 2D, it is a list of 1D arrays
@@ -543,9 +547,12 @@ class VoronoiGrid(FreezableClass):
 
     def __setitem__(self, item, value):
         if isinstance(value, VoronoiGridView):
-            if self.refined is None:
+            if self._x is None:
                 logger.warning("No geometry in target grid - copying from original grid")
-                self.set_points(value.x, value.y, value.z)
+                self.set_points(value.x, value.y, value.z,
+                                xmin=value.xmin, xmax=value.xmax,
+                                ymin=value.ymin, ymax=value.ymax,
+                                zmin=value.zmin, zmax=value.zmax)
             self.quantities[item] = deepcopy(value.quantities[value.viewed_quantity])
         elif isinstance(value, h5py.ExternalLink):
             self.quantities[item] = value

@@ -358,9 +358,11 @@ contains
        p%killed = .true.
     else
        p%in_cell = .true.
+       ! Only adjust the wall position for photons that were successfully
+       ! placed in a cell - for killed photons the cell indices are invalid
+       ! and adjust_wall would index the wall arrays out of bounds.
+       call adjust_wall(p)
     end if
-
-    call adjust_wall(p)
 
   end subroutine place_in_cell
 
@@ -444,7 +446,7 @@ contains
 
     type(photon),intent(in) :: p
     type(grid_cell) :: icell_actual
-    real(dp) :: phi,frac,dphi,r_sq,w_sq
+    real(dp) :: phi,frac,dphi,w_sq
     real(dp),parameter :: threshold = 1.e-3_dp
 
     icell_actual = find_cell(p)
