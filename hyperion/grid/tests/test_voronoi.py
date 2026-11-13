@@ -1,4 +1,3 @@
-from __future__ import print_function, division
 
 import os
 import random
@@ -110,11 +109,11 @@ def test_io(tmpdir):
 
     np.testing.assert_allclose(g1._sparse_neighbors[0], g2._sparse_neighbors[0])
     np.testing.assert_allclose(g1._sparse_neighbors[1], g2._sparse_neighbors[1])
-    
-    
+
+
 
 def test_init_sparse(tmpdir):
-    
+
     # Regression test for a bug that caused VoronoiGrid._sparse_neighbors to not be defined
     # when writing out a Voronoi grid.
 
@@ -129,8 +128,37 @@ def test_init_sparse(tmpdir):
     f2 = h5py.File(file_1, 'r')
     g2 = VoronoiGrid()
     g2.read(f2)
-    
+
     f3 = h5py.File(file_2, 'w')
     g3 = VoronoiGrid(g2)
     g3.write(f3)
 
+
+
+def test_setitem_from_view():
+    # Regression test for VoronoiGrid.__setitem__, which used to check a
+    # nonexistent 'refined' attribute when assigning a view to an empty grid
+    g1 = VoronoiGrid([1., 2., 3.], [3., 4., 5.], [2., 3., 4.])
+    g1.quantities['density'] = np.array([1., 2., 3.])
+    g2 = VoronoiGrid()
+    g2['density'] = g1['density']
+    np.testing.assert_allclose(g2['density'].array, g1['density'].array)
+    assert g2.xmin == g1.xmin and g2.xmax == g1.xmax
+    assert g2.ymin == g1.ymin and g2.ymax == g1.ymax
+    assert g2.zmin == g1.zmin and g2.zmax == g1.zmax
+
+
+def test_evaluate_function_average_constant():
+    # For a constant function every (non-empty) cell average must equal that
+    # constant. The old code divided the last cell's sum by a decremented
+    # sample count, inflating that one cell's average away from the constant.
+    np.random.seed(9876)
+    N = 12
+    x = np.random.random(N)
+    y = np.random.random(N)
+    z = np.random.random(N)
+
+    g = VoronoiGrid(x, y, z)
+    avg = g.evaluate_function_average(lambda x, y, z: 3.5 * np.ones_like(x),
+                                      n_samples=2000000, min_cell_samples=5)
+    np.testing.assert_allclose(avg, 3.5, rtol=1e-6)
