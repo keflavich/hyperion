@@ -1,6 +1,7 @@
 module mpi_routines
 
   use mpi
+  use mpi_interfaces
   use mpi_core
   use core_lib
   use grid_physics
@@ -72,7 +73,7 @@ contains
     integer(idp),intent(out) :: n_photons
 
     ! Number of photons used for MPI transfer
-    integer(idp),volatile,allocatable :: n_photons_send(:)
+    integer(idp),volatile,allocatable,save :: n_photons_send(:)
 
     ! Loop variable and dummy variable
     integer :: ir
@@ -91,6 +92,7 @@ contains
 
     real(dp),save :: time1 = -1._dp
     real(dp) :: time2
+    real(dp) :: dtime_send
     real(dp),allocatable,volatile,save :: dtime(:)
 
     if(debug) write(*,'("[mpi_routines] rank ",I0," requesting number of photons")') rank
@@ -151,8 +153,12 @@ contains
 
              n_photons_curr = n_photons_curr + n_photons_send(ir)
 
-             ! Send number of photons and initialize receive for status check
+             ! Send number of photons and initialize receive for status check.
+             ! The send buffer has the save attribute and each slot is only
+             ! reused once the acknowledgement from the worker has been
+             ! received, so the request can be freed straight away.
              call mpi_isend(n_photons_send(ir), 1, mpi_integer8, ir, tag1, mpi_comm_world, request_dum, ierr)
+             call mpi_request_free(request_dum, ierr)
              call mpi_irecv(dtime(ir), 1, mpi_real8, ir, tag2, mpi_comm_world, request(ir), ierr)
 
              if(first) started(ir) = .true.
@@ -184,6 +190,7 @@ contains
                    if(flag) then
                       n_photons_send(ir) = 0_idp
                       call mpi_isend(n_photons_send(ir), 1, mpi_integer8, ir, tag1, mpi_comm_world, request_dum, ierr)
+                      call mpi_request_free(request_dum, ierr)
                       call mpi_irecv(dum_dp, 1, mpi_real8, ir, tag2, mpi_comm_world, request(ir), ierr)
                       stopped(ir) = .true.
                       if(debug) write(*,'("[mpi_routines] send abort signal to rank ",I0)') ir
@@ -194,6 +201,7 @@ contains
                 else if(.not.started(ir)) then
                    n_photons_send(ir) = 0_idp
                    call mpi_isend(n_photons_send(ir), 1, mpi_integer8, ir, tag1, mpi_comm_world, request_dum, ierr)
+                   call mpi_request_free(request_dum, ierr)
                    call mpi_irecv(dum_dp, 1, mpi_real8, ir, tag2, mpi_comm_world, request(ir), ierr)
                    started(ir) = .true.
                    stopped(ir) = .true.
@@ -242,7 +250,8 @@ contains
 
        ! Receive number of photons and send acknowledgments
        call mpi_recv(n_photons, 1, mpi_integer8, rank_main, tag1, mpi_comm_world, status, ierr)
-       call mpi_isend(time2-time1, 1, mpi_real8, rank_main, tag2, mpi_comm_world, request_dum, ierr)
+       dtime_send = time2 - time1
+       call mpi_send(dtime_send, 1, mpi_real8, rank_main, tag2, mpi_comm_world, ierr)
 
        if(n_photons > n_photons_tot) stop "n_photons > n_photons_tot"
 
@@ -266,6 +275,8 @@ contains
     real(dp) :: tmp
     real(dp) :: dummy_dp
     integer(idp) :: dummy_idp
+
+    real(dp),allocatable :: tmp_3d(:,:,:)
     real(dp),allocatable :: tmp_2d(:,:)
     integer(idp),allocatable :: tmp_int_1d(:)
 
@@ -276,6 +287,17 @@ contains
        deallocate(tmp_2d)
     else
        call mpi_reduce(specific_energy_sum, dummy_dp, size(specific_energy_sum), mpi_real8, mpi_sum, rank_main, mpi_comm_world, ierr)
+    end if
+
+    if(allocated(specific_energy_sum_spectrum)) then
+       if(main_process()) then
+          allocate(tmp_3d(size(specific_energy_sum_spectrum,1),size(specific_energy_sum_spectrum,2),size(specific_energy_sum_spectrum,3)))
+          call mpi_reduce(specific_energy_sum_spectrum, tmp_3d, size(specific_energy_sum_spectrum), mpi_real8, mpi_sum, rank_main, mpi_comm_world, ierr)
+          specific_energy_sum_spectrum = tmp_3d
+          deallocate(tmp_3d)
+       else
+          call mpi_reduce(specific_energy_sum_spectrum, dummy_dp, size(specific_energy_sum_spectrum), mpi_real8, mpi_sum, rank_main, mpi_comm_world, ierr)
+       end if
     end if
 
     if(allocated(n_photons)) then

@@ -1,4 +1,3 @@
-from __future__ import print_function, division
 
 import numpy as np
 from astropy.table import Table, Column
@@ -9,7 +8,9 @@ from ..util.functions import B_nu, random_id, FreezableClass, \
     is_numpy_array, bool2str, str2bool, monotonically_increasing
 from ..util.integrate import integrate_loglog
 from ..util.validator import validate_scalar
-from astropy import log as logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def read_source(handle):
@@ -225,7 +226,7 @@ class Source(FreezableClass):
         if self.spectrum is not None:
             nu, fnu = self.spectrum['nu'], self.spectrum['fnu']
             if nu_range is not None:
-                raise NotImplemented("nu_range not yet implemented for spectrum")
+                raise NotImplementedError("nu_range not yet implemented for spectrum")
         elif self.temperature is not None:
             if nu_range is None:
                 raise ValueError("nu_range is needed for sources with Planck spectra")

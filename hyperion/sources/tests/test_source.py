@@ -1,4 +1,3 @@
-from __future__ import print_function, division
 
 import pytest
 import numpy as np
@@ -24,13 +23,13 @@ ALL_SOURCES = [Source, PointSource, PointSourceCollection, SpotSource,
 # SCALAR LUMINOSITY
 
 
-@pytest.mark.parametrize(('source_type'), list(set(ALL_SOURCES) - set([PointSourceCollection])))
+@pytest.mark.parametrize(('source_type'), [s for s in ALL_SOURCES if s is not PointSourceCollection])
 def test_luminosity_scalar(source_type):
     s = source_type()
     s.luminosity = 1.
 
 
-@pytest.mark.parametrize(('source_type'), list(set(ALL_SOURCES) - set([PointSourceCollection])))
+@pytest.mark.parametrize(('source_type'), [s for s in ALL_SOURCES if s is not PointSourceCollection])
 def test_luminosity_scalar_invalid2(source_type):
     s = source_type()
     with pytest.raises(ValueError) as exc:
@@ -38,7 +37,7 @@ def test_luminosity_scalar_invalid2(source_type):
     assert exc.value.args[0] == 'luminosity should be a scalar value'
 
 
-@pytest.mark.parametrize(('source_type'), list(set(ALL_SOURCES) - set([PointSourceCollection])))
+@pytest.mark.parametrize(('source_type'), [s for s in ALL_SOURCES if s is not PointSourceCollection])
 def test_luminosity_scalar_invalid3(source_type):
     s = source_type()
     with pytest.raises(ValueError) as exc:
@@ -46,7 +45,7 @@ def test_luminosity_scalar_invalid3(source_type):
     assert exc.value.args[0] == 'luminosity should be a numerical value'
 
 
-@pytest.mark.parametrize(('source_type'), list(set(ALL_SOURCES) - set([PointSourceCollection])))
+@pytest.mark.parametrize(('source_type'), [s for s in ALL_SOURCES if s is not PointSourceCollection])
 def test_luminosity_scalar_invalid4(source_type):
     s = source_type()
     with pytest.raises(ValueError) as exc:
@@ -88,7 +87,7 @@ def test_luminosity_array_invalid3(source_type):
 # TEMPERATURE
 
 
-@pytest.mark.parametrize(('source_type'), list(set(ALL_SOURCES) - set([MapSource])))
+@pytest.mark.parametrize(('source_type'), [s for s in ALL_SOURCES if s is not MapSource])
 def test_temperature(source_type):
     v = virtual_file()
     s = source_type()
@@ -771,3 +770,11 @@ def test_map_write_invalid2():
     with pytest.raises(Exception) as exc:
         s.write(v, 'test', None)
     assert exc.value.args[0] == 'map is zero everywhere'
+
+
+def test_spectrum_nu_range_not_implemented():
+    s = Source()
+    s.luminosity = 1.
+    s.spectrum = (np.array([1., 2., 3.]), np.array([1., 1., 1.]))
+    with pytest.raises(NotImplementedError):
+        s.get_spectrum(nu_range=(1., 2.))
