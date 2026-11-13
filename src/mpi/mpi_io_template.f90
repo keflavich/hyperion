@@ -2,6 +2,7 @@ module mpi_hdf5_io
 
   use core_lib
   use mpi
+  use mpi_interfaces
   use mpi_core
 
   implicit none
@@ -363,11 +364,13 @@ contains
     character(len=*),intent(in) :: path, name
     character(len=*),allocatable,intent(out) :: array(:)
     integer :: n1
-    if(main_process()) call hdf5_table_read_column_auto(handle, path, name, array)
-    n1 = size(array)
+    if(main_process()) then
+       call hdf5_table_read_column_auto(handle, path, name, array)
+       n1 = size(array)
+    end if
     call mpi_bcast(n1, 1, mpi_integer4, rank_main, mpi_comm_world, ierr)
     if(.not. main_process()) allocate(array(n1))
-    call mpi_bcast(array, n1, mpi_character, rank_main, mpi_comm_world, ierr)
+    call mpi_bcast(array, n1 * len(array), mpi_character, rank_main, mpi_comm_world, ierr)
   end subroutine mp_table_read_column_auto_1d_mpi_character
 
   subroutine mp_table_write_column_1d_mpi_character(handle, path, name, array)
@@ -437,8 +440,10 @@ contains
     character(len=*),intent(in) :: path, name
     @T,allocatable,intent(out) :: array(:)
     integer :: n1
-    if(main_process()) call hdf5_table_read_column_auto(handle, path, name, array)
-    n1 = size(array)
+    if(main_process()) then
+       call hdf5_table_read_column_auto(handle, path, name, array)
+       n1 = size(array)
+    end if
     call mpi_bcast(n1, 1, mpi_integer4, rank_main, mpi_comm_world, ierr)
     if(.not. main_process()) allocate(array(n1))
     call mpi_bcast(array, n1, <T>, rank_main, mpi_comm_world, ierr)

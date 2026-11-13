@@ -1,8 +1,6 @@
-from __future__ import print_function, division
 
 import numpy as np
-from astropy import log as logger
-import six
+import logging
 
 from ..dust import SphericalDust
 from ..util.constants import pi, G
@@ -11,6 +9,8 @@ from ..util.integrate import integrate_powerlaw
 from ..util.validator import validate_scalar
 
 from .core import Disk
+
+logger = logging.getLogger(__name__)
 
 
 class AlphaDisk(Disk):
@@ -350,7 +350,7 @@ class AlphaDisk(Disk):
 
     @dust.setter
     def dust(self, value):
-        if isinstance(value, six.string_types):
+        if isinstance(value, str):
             self._dust = SphericalDust(value)
         else:
             self._dust = value
@@ -447,6 +447,9 @@ class AlphaDisk(Disk):
 
         # Find density factor
         rho *= self.rho_0
+
+        if np.sum(rho * grid.volumes) == 0. and self.mass > 0:
+            raise Exception("Discretized disk mass is zero, suggesting that the grid is too coarse")
 
         norm = self.mass / np.sum(rho * grid.volumes)
 
