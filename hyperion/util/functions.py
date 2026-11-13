@@ -1,4 +1,3 @@
-from __future__ import print_function, division
 
 import string
 import random
@@ -11,7 +10,9 @@ import h5py
 import numpy as np
 
 from .constants import h, c, k
-from astropy import log as logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 MAX_FLOAT = np.log(np.finfo('d').max)
 
@@ -80,7 +81,6 @@ class FreezableClass(object):
 
     _frozen = False
     _final = False
-    _attributes = []
 
     def __init__(self):
         super(FreezableClass, self).__init__()
@@ -100,9 +100,11 @@ class FreezableClass(object):
     def __setattr__(self, key, value):
         if self._final:
             raise Exception("Attribute %s can no longer be changed" % key)
+        if '_attributes' not in self.__dict__:
+            object.__setattr__(self, '_attributes', set())
         if self._frozen and not key in self._attributes:
             raise AttributeError("Attribute %s does not exist" % key)
-        self._attributes.append(key)
+        self._attributes.add(key)
         object.__setattr__(self, key, value)
 
 
@@ -252,7 +254,7 @@ def delete_file(file_name):
 
 def is_numpy_array(variable):
     return issubclass(variable.__class__, (np.ndarray,
-                                           np.core.records.recarray,
+                                           np.recarray,
                                            np.ma.core.MaskedArray))
 
 

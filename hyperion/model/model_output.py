@@ -1,17 +1,17 @@
-from __future__ import print_function, division
 
 import os
 import warnings
 
 import numpy as np
-from astropy import log as logger
-import six
+import logging
 
 from ..util.constants import c, pi
 from ..util.functions import FreezableClass
 from ..dust import SphericalDust
 from ..util.otf_hdf5 import on_the_fly_hdf5
 from ..grid import CartesianGrid, SphericalPolarGrid, CylindricalPolarGrid, OctreeGrid, AMRGrid, VoronoiGrid
+
+logger = logging.getLogger(__name__)
 
 STOKESD = {}
 STOKESD['I'] = 0
@@ -151,7 +151,7 @@ class ModelOutput(FreezableClass):
 
             if track_origin == 'detailed':
 
-                if isinstance(source_id, six.string_types) and source_id != 'all':
+                if isinstance(source_id, str) and source_id != 'all':
                     try:
                         source_id = self.get_available_sources().index(source_id)
                     except ValueError:
@@ -330,7 +330,7 @@ class ModelOutput(FreezableClass):
         '''
 
         # Check argument types
-        if not isinstance(stokes, six.string_types):
+        if not isinstance(stokes, str):
             raise ValueError("stokes argument should be a string")
 
         # Check for inconsistent parameters
@@ -340,6 +340,8 @@ class ModelOutput(FreezableClass):
         if technique == 'peeled':
             n_groups = len(self.file['Peeled'])
             if (group < 0 and -group <= n_groups) or (group >= 0 and group < n_groups):
+                if group < 0:
+                    group = n_groups + group
                 g = self.file['Peeled/group_%05i' % (group + 1)]
             else:
                 raise ValueError('File only contains %i image/SED group(s)' % n_groups)
@@ -652,7 +654,7 @@ class ModelOutput(FreezableClass):
         '''
 
         # Check argument types
-        if not isinstance(stokes, six.string_types):
+        if not isinstance(stokes, str):
             raise ValueError("stokes argument should be a string")
 
         # Check for inconsistent parameters
@@ -662,6 +664,8 @@ class ModelOutput(FreezableClass):
         if technique == 'peeled':
             n_groups = len(self.file['Peeled'])
             if (group < 0 and -group <= n_groups) or (group >= 0 and group < n_groups):
+                if group < 0:
+                    group = n_groups + group
                 g = self.file['Peeled/group_%05i' % (group + 1)]
             else:
                 raise ValueError('File only contains %i image/SED group(s)' % n_groups)
@@ -958,6 +962,8 @@ class ModelOutput(FreezableClass):
         # If iteration is last one, find iteration number
         if iteration == -1:
             iteration = find_last_iteration(self.file)
+        else:
+            iteration = iteration + 1  # Python value is zero based
 
         # Return components
         components = list(self.file['iteration_%05i' % iteration].keys())

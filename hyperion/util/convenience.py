@@ -1,4 +1,3 @@
-from __future__ import print_function, division
 
 import numpy as np
 
@@ -8,13 +7,15 @@ class OptThinRadius(object):
     def __init__(self, temperature, value=1., min=0.):
         self.temperature = temperature
         self.value = value
-        self.min = 0.
+        self.min = min
 
     def __mul__(self, value):
-        return OptThinRadius(self.temperature, value=self.value * value)
+        return OptThinRadius(self.temperature, value=self.value * value,
+                             min=self.min)
 
     def __rmul__(self, value):
-        return OptThinRadius(self.temperature, value=self.value * value)
+        return OptThinRadius(self.temperature, value=self.value * value,
+                             min=self.min)
 
     def __str__(self):
         return "%g times the radius at which the optically thin temperature would be %gK" % (self.value, self.temperature)

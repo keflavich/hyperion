@@ -1,7 +1,5 @@
-from __future__ import print_function, division
 
 import numpy as np
-import six
 
 from ..dust import SphericalDust
 from ..grid import SphericalPolarGrid
@@ -55,6 +53,9 @@ class AmbientMedium(Density):
         self.rmin = rmin
         self.rmax = rmax
         self.subtract = subtract
+
+        # Central star
+        self.star = None
 
         # Dust
         self.dust = None
@@ -125,15 +126,15 @@ class AmbientMedium(Density):
 
     @dust.setter
     def dust(self, value):
-        if isinstance(value, six.string_types):
+        if isinstance(value, str):
             self._dust = SphericalDust(value)
         else:
             self._dust = value
 
     def _check_all_set(self):
 
-        if self.density is None:
-            raise Exception("density is not set")
+        if self.rho is None:
+            raise Exception("rho is not set")
         if self.rmin is None:
             raise Exception("rmin is not set")
         if self.rmax is None:
