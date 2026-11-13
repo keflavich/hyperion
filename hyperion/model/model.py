@@ -1,4 +1,3 @@
-from __future__ import print_function, division
 
 import os
 import subprocess
@@ -8,8 +7,7 @@ from copy import deepcopy
 import h5py
 import numpy as np
 
-from astropy import log as logger
-import six
+import logging
 
 from ..version import __version__
 from ..util.functions import delete_file
@@ -23,6 +21,8 @@ from ..util.validator import validate_scalar
 from ..util.nans import check_for_nans
 
 from .model_output import ModelOutput
+
+logger = logging.getLogger(__name__)
 
 
 class Configuration(FreezableClass):
@@ -125,8 +125,8 @@ class Model(FreezableClass, RunConf):
         self._monochromatic = str2bool(group.attrs['monochromatic'])
         if self._monochromatic:
             self._frequencies = np.array(group['frequencies']['nu'])
-            if 'energy_threshold' in group.attrs:
-                self._monochromatic_energy_threshold = group.attrs['energy_threshold']
+            if 'monochromatic_energy_threshold' in group.attrs:
+                self._monochromatic_energy_threshold = group.attrs['monochromatic_energy_threshold']
             else:
                 self._monochromatic_energy_threshold = 1.e-10
 
@@ -223,7 +223,7 @@ class Model(FreezableClass, RunConf):
         # Close the file
         f.close()
 
-    def use_quantities(self, filename, quantities=['density', 'specific_energy'],
+    def use_quantities(self, filename, quantities=['density', 'specific_energy', 'specific_energy_spectrum'],
                        use_minimum_specific_energy=True, use_dust=True, copy=True,
                        only_initial=False):
         '''
@@ -297,6 +297,13 @@ class Model(FreezableClass, RunConf):
                 else:
                     quantities_path['specific_energy'] = last_iteration
 
+            if 'specific_energy_spectrum' in quantities:
+                if only_initial or last_iteration is None:
+                    if 'specific_energy_spectrum' in f['/Input/Grid/Quantities']:
+                        quantities_path['specific_energy_spectrum'] = '/Input/Grid/Quantities'
+                elif 'specific_energy_spectrum' in f[last_iteration]:
+                    quantities_path['specific_energy_spectrum'] = last_iteration
+
             # Minimum specific energy
             if use_minimum_specific_energy:
                 minimum_specific_energy_path = '/Input/Grid/Quantities'
@@ -312,6 +319,10 @@ class Model(FreezableClass, RunConf):
             if 'specific_energy' in quantities:
                 if 'specific_energy' in f['/Grid/Quantities']:
                     quantities_path['specific_energy'] = '/Grid/Quantities'
+
+            if 'specific_energy_spectrum' in quantities:
+                if 'specific_energy_spectrum' in f['/Grid/Quantities']:
+                    quantities_path['specific_energy_spectrum'] = '/Grid/Quantities'
 
             # Minimum specific energy
             if use_minimum_specific_energy:
@@ -461,8 +472,8 @@ class Model(FreezableClass, RunConf):
             g_image = f['/Input/Output/']
 
         # Read in binned images
-        if 'n_theta' in g_image['Binned']:
-            self.binned_output = BinnedImageConf.read(g_image['Binned'])
+        if 'group_00001' in g_image['Binned']:
+            self.binned_output = BinnedImageConf.read(g_image['Binned']['group_00001'])
 
         # Read in peeled images
         for peeled in g_image['Peeled']:
@@ -637,7 +648,7 @@ class Model(FreezableClass, RunConf):
 
                     if copy:
 
-                        if isinstance(dust, six.string_types):
+                        if isinstance(dust, str):
                             dust = SphericalDust(dust)
 
                         if dust.hash() in present:
@@ -815,7 +826,7 @@ class Model(FreezableClass, RunConf):
             # Only consider this if the specific energy is not specified
             if specific_energy is None:
 
-                if isinstance(dust, six.string_types):
+                if isinstance(dust, str):
 
                     if dust in self.dust:
 
@@ -829,7 +840,7 @@ class Model(FreezableClass, RunConf):
 
                     dust_hashes = []
                     for d in self.dust:
-                        if not isinstance(d, six.string_types):
+                        if not isinstance(d, str):
                             dust_hashes.append(d.hash())
                         else:
                             dust_hashes.append(None)

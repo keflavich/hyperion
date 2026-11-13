@@ -1,12 +1,12 @@
-from __future__ import print_function, division
 
 import warnings
 import numpy as np
-from astropy import log as logger
-import six
+import logging
 
 from ..util.functions import FreezableClass, bool2str, str2bool, is_numpy_array
 from ..filter import Filter
+
+logger = logging.getLogger(__name__)
 
 
 class OutputConf(FreezableClass):
@@ -18,6 +18,7 @@ class OutputConf(FreezableClass):
         self.output_density = 'none'
         self.output_density_diff = 'none'
         self.output_specific_energy = 'last'
+        self.output_specific_energy_spectrum = 'none'
         self.output_n_photons = 'none'
         self._freeze()
 
@@ -27,6 +28,10 @@ class OutputConf(FreezableClass):
         self.output_density = group.attrs['output_density'].decode('utf-8')
         self.output_density_diff = group.attrs['output_density_diff'].decode('utf-8')
         self.output_specific_energy = group.attrs['output_specific_energy'].decode('utf-8')
+        if 'output_specific_energy_spectrum' in group.attrs:
+            self.output_specific_energy_spectrum = group.attrs['output_specific_energy_spectrum'].decode('utf-8')
+        else:
+            self.output_specific_energy_spectrum = 'none'
         self.output_n_photons = group.attrs['output_n_photons'].decode('utf-8')
         return self
 
@@ -34,6 +39,7 @@ class OutputConf(FreezableClass):
         group.attrs['output_density'] = np.bytes_(self.output_density.encode('utf-8'))
         group.attrs['output_density_diff'] = np.bytes_(self.output_density_diff.encode('utf-8'))
         group.attrs['output_specific_energy'] = np.bytes_(self.output_specific_energy.encode('utf-8'))
+        group.attrs['output_specific_energy_spectrum'] = np.bytes_(self.output_specific_energy_spectrum.encode('utf-8'))
         group.attrs['output_n_photons'] = np.bytes_(self.output_n_photons.encode('utf-8'))
 
 
@@ -52,6 +58,8 @@ class RunConf(object):
         self.set_max_reabsorptions(1000000)
         self.set_pda(False)
         self.set_mrw(False)
+        self.specific_energy_spectrum_bin_edges = None
+
         self.set_convergence(False)
         self.set_kill_on_absorb(False)
         self.set_kill_on_scatter(False)
@@ -81,7 +89,7 @@ class RunConf(object):
             How often the photon position and cell should be double-checked (1
             is always, 0 is never).
         '''
-        if not np.isscalar(frequency) or isinstance(frequency, six.string_types):
+        if not np.isscalar(frequency) or isinstance(frequency, str):
             raise TypeError("frequency should be a scalar value")
         if frequency < 0. or frequency > 1.:
             raise ValueError("frequency should be between 0 and 1")
@@ -391,6 +399,60 @@ class RunConf(object):
     def _write_pda(self, group):
         group.attrs['pda'] = bool2str(self.pda)
 
+    def _read_specific_energy_spectrum_bins(self, group):
+        if 'specific_energy_spectrum_bin_edges' in group:
+            self.specific_energy_spectrum_bin_edges = \
+                np.array(group['specific_energy_spectrum_bin_edges']['nu'])
+        else:
+            self.specific_energy_spectrum_bin_edges = None
+
+    def _write_specific_energy_spectrum_bins(self, group):
+
+        edges = self.specific_energy_spectrum_bin_edges
+
+        if edges is None:
+            conf = getattr(self, 'conf', None)
+            if conf is not None and conf.output.output_specific_energy_spectrum != 'none':
+                raise ValueError("output_specific_energy_spectrum is enabled but the "
+                                 "frequency bins have not been set - use "
+                                 "set_specific_energy_spectrum_bins to set them")
+            return
+
+        group.create_dataset('specific_energy_spectrum_bin_edges',
+                             data=np.array(list(zip(edges)), dtype=[('nu', float)]))
+
+    def set_specific_energy_spectrum_bins(self, edges):
+
+        '''
+        Set the frequency bins onto which the frequency-resolved specific
+        energy (``specific_energy_spectrum``) is binned.
+
+        This is required if ``conf.output.output_specific_energy_spectrum`` is
+        set to ``'all'`` or ``'last'``.
+
+        Parameters
+        ----------
+        edges : iterable of float
+            The edges of the frequency bins (in Hz), in increasing order:
+            ``n + 1`` values define ``n`` bins, and
+            ``specific_energy_spectrum`` has one entry per bin. Energy
+            absorbed from photons with frequencies outside the outer edges
+            is not included in the spectrum, so the spectrum summed over the
+            bins only recovers ``specific_energy`` if the edges span the
+            frequency range over which energy is absorbed.
+        '''
+
+        edges = np.asarray(edges, dtype=float)
+        if edges.ndim != 1 or edges.size < 2:
+            raise ValueError("edges should be a 1-d array of at least two values")
+        if np.any(edges <= 0.):
+            raise ValueError("edges should be positive (in Hz)")
+        if np.any(np.diff(edges) <= 0.):
+            raise ValueError("edges should be strictly increasing")
+
+        self.specific_energy_spectrum_bin_edges = edges
+
+
     def set_mrw(self, mrw, gamma=1.0, inter_max=1000, warn=True):
         '''
         Set whether to use the Modified Random Walk (MRW) approximation
@@ -467,7 +529,7 @@ class RunConf(object):
             The relative threshold below which the ratio in the percentile
             value has to be for convergence.
         '''
-        self.check_convergence = True
+        self.check_convergence = convergence
         self.convergence_percentile = percentile
         self.convergence_absolute = absolute
         self.convergence_relative = relative
@@ -719,6 +781,7 @@ class RunConf(object):
         self._read_max_reabsorptions(group)
         self._read_pda(group)
         self._read_mrw(group)
+        self._read_specific_energy_spectrum_bins(group)
         self._read_convergence(group)
         self._read_kill_on_absorb(group)
         self._read_kill_on_scatter(group)
@@ -747,6 +810,7 @@ class RunConf(object):
         self._write_max_reabsorptions(group)
         self._write_pda(group)
         self._write_mrw(group)
+        self._write_specific_energy_spectrum_bins(group)
         self._write_convergence(group)
         self._write_kill_on_absorb(group)
         self._write_kill_on_scatter(group)

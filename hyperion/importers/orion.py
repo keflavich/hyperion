@@ -1,9 +1,7 @@
-from __future__ import print_function, division
 
 import numpy as np
 
-from astropy import log as logger
-import six
+import logging
 
 from ..grid.amr_grid import Grid, Level, AMRGrid
 
@@ -58,9 +56,9 @@ class OrionGrid(Grid):
         p8 = header.find('))', p7)
         bytes = [int(x) for x in header[p7:p8].split()]
 
-        if bytes == range(1, n_bytes + 1):
+        if bytes == list(range(1, n_bytes + 1)):
             endian = '>'
-        elif bytes == range(n_bytes, 0, -1):
+        elif bytes == list(range(n_bytes, 0, -1)):
             endian = '<'
         else:
             raise Exception("Unexpected bytes: %s" % str(bytes))
@@ -72,7 +70,7 @@ class OrionGrid(Grid):
         for quantity in quantity_indices:
 
             f.seek(pos + quantity_indices[quantity] * n_bytes * gridsize)
-            array = np.fromstring(f.read(n_bytes * gridsize),
+            array = np.frombuffer(f.read(n_bytes * gridsize),
                                   dtype='%sf%i' % (endian, n_bytes))
             self.quantities[quantity] = array.reshape(self.nz, self.ny, self.nx)
 
@@ -110,7 +108,7 @@ class OrionAMRGrid(AMRGrid):
         available_quantities = [f.readline().strip() for i in range(n_quantities)]
 
         # If a single quantity is requested as a string, make it into a list
-        if isinstance(quantities, six.string_types):
+        if isinstance(quantities, str):
             if quantities == 'all':
                 quantities = available_quantities
             else:

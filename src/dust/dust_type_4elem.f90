@@ -20,6 +20,7 @@ module type_dust
 
   public :: get_j_nu_interp
   public :: get_j_nu_binned
+  public :: get_j_nu_bin_fractions
   public :: get_chi_nu_interp
   public :: get_chi_nu_binned
 
@@ -87,7 +88,6 @@ contains
     character(len=100) :: path
     character(len=4) :: sublimation
     type(version) :: python_version
-    integer :: dust_version
 
     ! Read dust file
 
@@ -788,6 +788,34 @@ contains
     j_nu = j_nu / integral_loglog(d%j_nu(jnu_var_id)%x, d%j_nu(jnu_var_id)%pdf)
 
   end function get_j_nu_binned
+
+  function get_j_nu_bin_fractions(d, jnu_var_id, nu_edges) result(frac)
+
+    ! Fraction of the emissivity falling into each of the bins whose edges
+    ! are given by nu_edges (in ascending order). The fractions are
+    ! normalized by the integral of the emissivity over all frequencies, so
+    ! they add up to the fraction of the emissivity that falls inside the
+    ! bins (which is one if the bins cover the full emissivity range).
+
+    implicit none
+
+    type(dust),intent(in) :: d
+    integer,intent(in) :: jnu_var_id
+    real(dp),intent(in) :: nu_edges(:)
+    real(dp) :: frac(size(nu_edges)-1)
+
+    integer :: inu
+    real(dp) :: norm
+
+    do inu=1, size(nu_edges) - 1
+       frac(inu) = integral_loglog(d%j_nu(jnu_var_id)%x, d%j_nu(jnu_var_id)%pdf, &
+            &                      nu_edges(inu), nu_edges(inu+1))
+    end do
+
+    norm = integral_loglog(d%j_nu(jnu_var_id)%x, d%j_nu(jnu_var_id)%pdf)
+    if(norm > 0._dp) frac = frac / norm
+
+  end function get_j_nu_bin_fractions
 
   function get_chi_nu_interp(d, nu) result(chi_nu)
 

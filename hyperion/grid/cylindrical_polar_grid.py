@@ -1,4 +1,3 @@
-from __future__ import print_function, division
 
 import hashlib
 from copy import deepcopy
@@ -8,8 +7,10 @@ import numpy as np
 
 from ..util.meshgrid import meshgrid_nd
 from ..util.functions import FreezableClass, is_numpy_array, monotonically_increasing, link_or_copy, as_str
-from astropy import log as logger
+import logging
 from .grid_helpers import single_grid_dims
+
+logger = logging.getLogger(__name__)
 
 
 class CylindricalPolarGrid(FreezableClass):
@@ -307,6 +308,8 @@ class CylindricalPolarGrid(FreezableClass):
         # Read in physical quantities
         if quantities is not None:
             for quantity in group:
+                if quantity == 'specific_energy_spectrum_bin_edges':
+                    continue  # per-frequency metadata, not a per-cell grid quantity
                 if quantities == 'all' or quantity in quantities:
                     array = np.array(group[quantity])
                     if array.ndim == 4:  # if array is 4D, it is a list of 3D arrays

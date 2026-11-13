@@ -1,4 +1,3 @@
-from __future__ import print_function, division
 
 import struct
 import hashlib
@@ -8,8 +7,10 @@ import h5py
 import numpy as np
 
 from ..util.functions import FreezableClass, is_numpy_array, link_or_copy, as_str
-from astropy import log as logger
+import logging
 from .grid_helpers import single_grid_dims
+
+logger = logging.getLogger(__name__)
 
 
 class OctreeGrid(FreezableClass):
@@ -372,6 +373,8 @@ class OctreeGrid(FreezableClass):
         # Read in physical quantities
         if quantities is not None:
             for quantity in group:
+                if quantity == 'specific_energy_spectrum_bin_edges':
+                    continue  # per-frequency metadata, not a per-cell grid quantity
                 if quantities == 'all' or quantity in quantities:
                     array = np.array(group[quantity])
                     if array.ndim == 2:  # if array is 2D, it is a list of 1D arrays

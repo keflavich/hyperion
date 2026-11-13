@@ -1,4 +1,3 @@
-from __future__ import print_function, division
 
 import struct
 
@@ -6,7 +5,6 @@ import numpy as np
 from numpy.testing import assert_array_almost_equal_nulp
 
 import pytest
-import six
 
 from ..integrate import *
 
@@ -86,28 +84,32 @@ def test_linlog_subset_special(xmin, xmax):
     assert almost_equal(integrate_linlog_subset(x, y, xmin, xmax), xmax - xmin)
 
 
-@pytest.mark.parametrize(('dtype_x', 'dtype_y'), zip(DTYPES, DTYPES))
+@pytest.mark.parametrize('dtype_x', DTYPES)
+@pytest.mark.parametrize('dtype_y', DTYPES)
 def test_linear_types(dtype_x, dtype_y):
     x = np.array([1, 2], dtype=dtype_x)
     y = np.array([1, 1], dtype=dtype_y)
     assert integrate(x, y) == 1.
 
 
-@pytest.mark.parametrize(('dtype_x', 'dtype_y'), zip(DTYPES, DTYPES))
+@pytest.mark.parametrize('dtype_x', DTYPES)
+@pytest.mark.parametrize('dtype_y', DTYPES)
 def test_loglog_types(dtype_x, dtype_y):
     x = np.array([1, 2], dtype=dtype_x)
     y = np.array([1, 1], dtype=dtype_y)
     assert integrate_loglog(x, y) == 1.
 
 
-@pytest.mark.parametrize(('dtype_x', 'dtype_y'), zip(DTYPES, DTYPES))
+@pytest.mark.parametrize('dtype_x', DTYPES)
+@pytest.mark.parametrize('dtype_y', DTYPES)
 def test_loglin_types(dtype_x, dtype_y):
     x = np.array([1, 2], dtype=dtype_x)
     y = np.array([1, 1], dtype=dtype_y)
     assert integrate_loglin(x, y) == 1.
 
 
-@pytest.mark.parametrize(('dtype_x', 'dtype_y'), zip(DTYPES, DTYPES))
+@pytest.mark.parametrize('dtype_x', DTYPES)
+@pytest.mark.parametrize('dtype_y', DTYPES)
 def test_linlog_types(dtype_x, dtype_y):
     x = np.array([1, 2], dtype=dtype_x)
     y = np.array([1, 1], dtype=dtype_y)
@@ -119,7 +121,7 @@ def test_linear_not_monotonic():
     y = 2. * x - 1.
     with pytest.raises(ValueError) as exc:
         integrate(x, y)
-    if isinstance(exc.value, six.string_types):
+    if isinstance(exc.value, str):
         assert exc.value == 'x is not monotonically increasing'
     else:
         assert exc.value.args[0] == 'x is not monotonically increasing'
@@ -130,7 +132,7 @@ def test_loglog_not_monotonic():
     y = 2. * x - 1.
     with pytest.raises(ValueError) as exc:
         integrate_loglog(x, y)
-    if isinstance(exc.value, six.string_types):
+    if isinstance(exc.value, str):
         assert exc.value == 'x is not monotonically increasing'
     else:
         assert exc.value.args[0] == 'x is not monotonically increasing'
@@ -141,7 +143,7 @@ def test_loglin_not_monotonic():
     y = 2. * x - 1.
     with pytest.raises(ValueError) as exc:
         integrate_loglin(x, y)
-    if isinstance(exc.value, six.string_types):
+    if isinstance(exc.value, str):
         assert exc.value == 'x is not monotonically increasing'
     else:
         assert exc.value.args[0] == 'x is not monotonically increasing'
@@ -152,7 +154,20 @@ def test_linlog_not_monotonic():
     y = 2. * x - 1.
     with pytest.raises(ValueError) as exc:
         integrate_linlog(x, y)
-    if isinstance(exc.value, six.string_types):
+    if isinstance(exc.value, str):
         assert exc.value == 'x is not monotonically increasing'
     else:
         assert exc.value.args[0] == 'x is not monotonically increasing'
+
+
+@pytest.mark.parametrize(('subset', 'full'),
+                         [(integrate_subset, integrate),
+                          (integrate_loglin_subset, integrate_loglin),
+                          (integrate_linlog_subset, integrate_linlog),
+                          (integrate_loglog_subset, integrate_loglog)])
+def test_subset_full_range(subset, full):
+    # Regression test for a bug that caused the second-to-last tabulated
+    # point to be dropped when the upper limit was the last tabulated value
+    x = np.array([1., 2., 3., 4., 5.])
+    y = np.array([1., 3., 2., 5., 4.])
+    assert almost_equal(subset(x, y, x[0], x[-1]), full(x, y))

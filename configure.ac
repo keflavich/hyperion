@@ -49,7 +49,12 @@ if test "$enable_debug" == "yes"
 then
   debug_nag='-C=all -gline -nan'
   debug_ifort='-check all -warn all -warn nodec -warn interfaces -gen_interfaces -traceback -g'
-  debug_gfortran='-Wall -fbounds-check -g'
+  # Unused dummy arguments are not warned about because many procedures have
+  # to conform to interfaces shared between the different grid geometries,
+  # and unused functions are not warned about because some private library
+  # functions are intentionally unused (including empty contained subroutines
+  # that work around a PGI compiler bug).
+  debug_gfortran='-Wall -Wno-unused-dummy-argument -Wno-unused-function -fbounds-check -g'
   debug_g95='-Wall -fbounds-check -g'
   debug_pgi='-Mbounds -traceback -g'
 else
@@ -165,14 +170,23 @@ then
     mpi_compiler=`basename $(mpifort -show | awk {'print $1'})`
   fi
   AC_SUBST(mpi_fc, 'h5pfc')
-elif test "$parallel_compiler" == mpif90
+elif test "$parallel_compiler" == mpif90 || test "$parallel_compiler" == mpifort
 then
-  mpi_compiler=`basename $(mpif90 -show | awk {'print $1'})`
-  AC_SUBST(mpi_fc, 'HDF5_FLINKER=mpif90 HDF5_FC=mpif90 h5fc')
-elif test "$parallel_compiler" == mpifort
-then
-  mpi_compiler=`basename $(mpifort -show | awk {'print $1'})`
-  AC_SUBST(mpi_fc, 'HDF5_FLINKER=mpifort HDF5_FC=mpifort h5fc')
+  mpi_compiler=`basename $($parallel_compiler -show | awk {'print $1'})`
+  # The h5fc wrapper in HDF5 1.x lets HDF5_FC and HDF5_FLINKER replace the
+  # compiler it calls, so we can make it call the MPI wrapper. The h5fc in
+  # HDF5 2.x is a different, pkg-config based script that ignores these
+  # variables and always calls the serial compiler, so in that case we do the
+  # reverse and make the MPI wrapper call h5fc (MPICH_FC is read by MPICH and
+  # OMPI_FC by Open MPI). The HDF5 2.x wrapper also no longer adds the linker
+  # flags HDF5 was built with, so we pass on LDFLAGS ourselves.
+  h5fc_compiler=`HDF5_FLINKER=$parallel_compiler HDF5_FC=$parallel_compiler h5fc -show | awk {'print $1'}`
+  if test "$h5fc_compiler" == "$parallel_compiler"
+  then
+    AC_SUBST(mpi_fc, "HDF5_FLINKER=$parallel_compiler HDF5_FC=$parallel_compiler h5fc")
+  else
+    AC_SUBST(mpi_fc, "MPICH_FC=h5fc OMPI_FC=h5fc $parallel_compiler $LDFLAGS")
+  fi
 else
   AC_MSG_ERROR("h5pfc or mpif90 need to be present")
 fi

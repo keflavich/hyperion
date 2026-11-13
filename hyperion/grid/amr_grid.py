@@ -1,6 +1,6 @@
-from __future__ import print_function, division
 
 import os
+import posixpath
 import struct
 import hashlib
 from copy import deepcopy
@@ -10,13 +10,15 @@ import numpy as np
 
 from ..util.meshgrid import meshgrid_nd
 from ..util.functions import FreezableClass, link_or_copy, as_str
-from astropy import log as logger
+import logging
 from .grid_helpers import single_grid_dims
 
+logger = logging.getLogger(__name__)
 
-def zero_density(grid, xmin=-np.inf, xmax=np.inf, ymin=-np.inf, ymax=np.inf, zmin=np.inf, zmax=np.inf):
-    for ilevel, level in enumerate(grid.levels):
-        for igrid, grid in enumerate(level.grids):
+
+def zero_density(amr_grid, xmin=-np.inf, xmax=np.inf, ymin=-np.inf, ymax=np.inf, zmin=-np.inf, zmax=np.inf):
+    for level in amr_grid.levels:
+        for grid in level.grids:
             wx = np.linspace(grid.xmin, grid.xmax, grid.nx + 1)
             wy = np.linspace(grid.ymin, grid.ymax, grid.ny + 1)
             wz = np.linspace(grid.zmin, grid.zmax, grid.nz + 1)
@@ -25,8 +27,13 @@ def zero_density(grid, xmin=-np.inf, xmax=np.inf, ymin=-np.inf, ymax=np.inf, zmi
             z = 0.5 * (wz[:-1] + wz[1:])
             gx, gy, gz = meshgrid_nd(x, y, z)
             reset = (gx < xmin) | (gx > xmax) | (gy < ymin) | (gy > ymax) | (gz < zmin) | (gz > zmax)
-            grid.data[reset] = 0.
-    return grid
+            for quantity in grid.quantities:
+                if isinstance(grid.quantities[quantity], list):
+                    for array in grid.quantities[quantity]:
+                        array[reset] = 0.
+                else:
+                    grid.quantities[quantity][reset] = 0.
+    return amr_grid
 
 
 class Grid(FreezableClass):
@@ -509,13 +516,13 @@ class AMRGrid(FreezableClass):
                     grid_ref.quantities[item] = deepcopy(grid.quantities[value.viewed_quantity])
         elif isinstance(value, h5py.ExternalLink):
             filename = value.filename
-            base_path = os.path.dirname(value.path)
-            array_name = os.path.basename(value.path)
+            base_path = posixpath.dirname(value.path)
+            array_name = posixpath.basename(value.path)
             for ilevel, level_ref in enumerate(self.levels):
                 level_path = 'level_%05i' % (ilevel + 1)
                 for igrid, grid_ref in enumerate(level_ref.grids):
-                    grid_path = 'grid_%05i' % (ilevel + 1)
-                    grid_ref.quantities[item] = h5py.ExternalLink(filename, os.path.join(base_path, level_path, grid_path, array_name))
+                    grid_path = 'grid_%05i' % (igrid + 1)
+                    grid_ref.quantities[item] = h5py.ExternalLink(filename, posixpath.join(base_path, level_path, grid_path, array_name))
         elif value == []:
             for level in self.levels:
                 for grid in level.grids:

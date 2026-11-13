@@ -195,6 +195,52 @@ only after last iteration), or ``none`` (do not output). The default is to
 output only the last iteration of ``specific_energy``. To find out how to view
 these values, see :doc:`../postprocessing/postprocessing`
 
+Frequency-resolved specific energy
+----------------------------------
+
+In addition to the total specific energy absorbed in each cell
+(``output_specific_energy``), Hyperion can save the specific energy absorbed as
+a function of frequency. This is controlled in the same way as the other output
+quantities::
+
+    m.conf.output.output_specific_energy_spectrum = 'all'    # every iteration
+                                              # 'last'  -> only final iteration
+                                              # 'none'  -> not computed or saved (default)
+
+When it is not ``'none'``, the frequency bins have to be set explicitly with::
+
+    import numpy as np
+    m.set_specific_energy_spectrum_bins(np.logspace(11., 16., 101))
+
+which takes the ``n + 1`` bin edges (in Hz, in increasing order) that define
+``n`` bins. Two extra datasets are then written out:
+
+* ``specific_energy_spectrum`` -- the specific energy absorbed in each cell as a
+  function of frequency, in erg/s/g, with one entry per bin.
+* ``specific_energy_spectrum_bin_edges`` -- the edges (in Hz) of the frequency
+  bins, with one more entry than the number of bins.
+
+Since the spectrum is a histogram, it is best plotted against the bin edges as
+steps (e.g. with ``matplotlib``'s ``stairs``) rather than at a single
+representative frequency per bin.
+
+This is the *absorbed* (deposited) energy spectrum, not the mean intensity: each
+contribution is weighted by the dust absorption opacity, so it is proportional
+to :math:`\kappa_\nu J_\nu`. To recover the mean intensity :math:`J_\nu` (the
+radiation field), divide by the dust absorption opacity at each frequency.
+
+Energy absorbed from photons with frequencies outside the outermost edges is
+*not* included in the spectrum, so summed over frequency,
+``specific_energy_spectrum`` only recovers the total ``specific_energy`` if the
+edges span the full range of frequencies over which energy is absorbed.
+
+This works for all grid types, including AMR and Voronoi.
+
+``specific_energy_spectrum`` can be retrieved like other grid quantities, as an array
+with an extra leading frequency axis::
+
+    senu = m.get_quantities()['specific_energy_spectrum']
+
 Advanced parameters
 -------------------
 
